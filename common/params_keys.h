@@ -37,7 +37,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"DoShutdown", {CLEAR_ON_MANAGER_START, BOOL}},
     {"DoUninstall", {CLEAR_ON_MANAGER_START, BOOL}},
     {"DriverTooDistracted", {CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON, BOOL}},
-    {"AlphaLongitudinalEnabled", {PERSISTENT | DEVELOPMENT_ONLY | BACKUP, BOOL}},
+    {"AlphaLongitudinalEnabled", {PERSISTENT | DEVELOPMENT_ONLY | BACKUP, BOOL, "1"}},
     {"ExperimentalMode", {PERSISTENT | BACKUP, BOOL}},
     {"ExperimentalModeConfirmed", {PERSISTENT | BACKUP, BOOL}},
     {"FirmwareQueryDone", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
@@ -266,7 +266,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Smart Cruise Control
     {"MapTargetVelocities", {CLEAR_ON_ONROAD_TRANSITION, STRING}},
     {"SmartCruiseControlMap", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"SmartCruiseControlVision", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"SmartCruiseControlVision", {PERSISTENT | BACKUP, BOOL, "1"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},
