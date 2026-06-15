@@ -31,6 +31,17 @@ def compute_metrics(labels):
     return {"tp": tp, "fp": fp, "fn": fn, "precision": precision, "recall": recall}
 
 
+def aggregate(per_seg):
+    """{seg: [onset idx...]} → 요약 dict (세그수/발화세그수/총발화)."""
+    total = sum(len(v) for v in per_seg.values())
+    with_onset = sum(1 for v in per_seg.values() if v)
+    return {
+        "segments": len(per_seg),
+        "segments_with_onset": with_onset,
+        "total_onsets": total,
+    }
+
+
 def save(labels, path):
     with open(path, "w", encoding="utf-8") as f:
         json.dump([asdict(l) for l in labels], f, ensure_ascii=False, indent=2)

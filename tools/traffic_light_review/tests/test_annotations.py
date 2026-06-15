@@ -28,3 +28,12 @@ def test_save_load_roundtrip(tmp_path):
     p = tmp_path / "a.json"
     save(labels, str(p))
     assert load(str(p)) == labels
+
+
+def test_aggregate_onsets_counts():
+    from tools.traffic_light_review.annotations import aggregate
+    per_seg = {"s1": [2, 10], "s2": [], "s3": [4]}
+    agg = aggregate(per_seg)
+    assert agg["total_onsets"] == 3
+    assert agg["segments"] == 3
+    assert agg["segments_with_onset"] == 2
