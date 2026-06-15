@@ -4,23 +4,25 @@ from tools.traffic_light_review.logreader import Frame, frames_from_events
 class FakeModel:
     def __init__(self):
         self.position = type("P", (), {"x": [1.0] * 33, "y": [0.0] * 33})()
-        self.velocity = type("V", (), {"x": [10.0] * 33})()
         self.frameId = 7
 
 
 class FakeCarState:
     vEgo = 10.0
-    aEgo = 0.0
-    steeringAngleDeg = 0.0
+    standstill = False
+    gasPressed = False
 
 
 class FakeLead:
-    dRel = 40.0
     status = True
 
 
 class FakeRadar:
     leadOne = FakeLead()
+
+
+class FakeCarControl:
+    enabled = True
 
 
 class Evt:
@@ -42,6 +44,7 @@ def test_frames_from_events_pairs_latest_state():
     events = [
         Evt("carState", FakeCarState(), 100),
         Evt("radarState", FakeRadar(), 110),
+        Evt("carControl", FakeCarControl(), 115),
         Evt("modelV2", FakeModel(), 120),
         Evt("modelV2", FakeModel(), 170),
     ]
@@ -49,5 +52,7 @@ def test_frames_from_events_pairs_latest_state():
     assert len(frames) == 2                      # modelV2 마다 1프레임
     assert isinstance(frames[0], Frame)
     assert frames[0].inputs.v_ego == 10.0
-    assert frames[0].inputs.d_rel == 40.0
+    assert frames[0].inputs.has_lead is True
+    assert frames[0].inputs.cc_enabled is True
+    assert frames[0].inputs.standstill is False
     assert frames[0].t_mono == 120

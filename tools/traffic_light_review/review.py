@@ -1,12 +1,12 @@
-"""신호등 검출 리뷰·라벨링 도구.
+"""신호등(정지/출발) 검출 리뷰·시각화 도구.
 
-사용법 (Windows 경로 사용):
-  python -m tools.traffic_light_review.review <세그먼트_디렉터리> [--out labels.json]
-  python -m tools.traffic_light_review.review <세그먼트_디렉터리> --summary   # 비대화형, 검출통계
-  python -m tools.traffic_light_review.review batch --out <부모_디렉터리>      # 전체 세그 발화빈도
+검출은 sunnypilot greenLightAlert 방식(정차+앞차없음+경로 열림/닫힘)으로 RED/GREEN 판정.
 
-키: space=재생/정지  ←/→=스크럽  1=정상  2=오탐  m=미검출  s=저장  q=종료
-이벤트 스텝: RED onset 마다 자동 정지 → 1/2 로 판정 후 자동 진행.
+사용법 (Windows 경로):
+  python -m tools.traffic_light_review.review <세그> --summary           # 비대화형 통계
+  python -m tools.traffic_light_review.review <세그> --render out.mp4     # 영상에 RED/GREEN 오버레이
+  python -m tools.traffic_light_review.review batch --out <부모디렉터리>  # 전체 세그 발화빈도
+  python -m tools.traffic_light_review.review <세그> [--out labels.json]  # pygame 인터랙티브(설치시)
 """
 import argparse
 import glob
@@ -19,17 +19,21 @@ from tools.traffic_light_review.annotations import (
     Label, detect_red_onsets, compute_metrics, save, aggregate,
 )
 
+STATE_NAME = {0: "OFF", 1: "RED", 2: "GREEN"}
+STATE_BGR = {0: (160, 160, 160), 1: (0, 0, 220), 2: (0, 200, 0)}   # OpenCV BGR
+
 
 def summary(seg_dir):
     frames, _ = load_segment(seg_dir)
     states, outs = run_detector(frames)
     onsets = detect_red_onsets(states)
+    n_green = sum(1 for s in states if s == 2)
     print(f"세그먼트: {os.path.basename(seg_dir.rstrip(os.sep))}")
-    print(f"  프레임 {len(frames)}개, RED 발화 onset {len(onsets)}건")
+    print(f"  프레임 {len(frames)}개, RED onset {len(onsets)}건, GREEN 프레임 {n_green}개")
     for i in onsets:
         d = outs[i].diagnostics
-        print(f"   frame {i}: x_stop={outs[i].x_stop:.1f} "
-              f"model_v={d['model_v']} guards={d['guards']}")
+        print(f"   frame {i}: x_end={d['model_x_end']} v={d['v_ego']} "
+              f"armed={d['armed']} lead={d['has_lead']}")
 
 
 def batch(parent_dir):
@@ -40,7 +44,7 @@ def batch(parent_dir):
             continue
         try:
             frames, _ = load_segment(s)
-        except Exception:   # 잘린/손상 rlog 세그먼트 격리
+        except Exception:
             continue
         states, _ = run_detector(frames)
         per_seg[os.path.basename(s)] = detect_red_onsets(states)
@@ -53,6 +57,41 @@ def batch(parent_dir):
     return agg
 
 
+def render(seg_dir, out_path):
+    import cv2
+    frames, qcam = load_segment(seg_dir)
+    if not qcam:
+        print("qcamera.ts 없음 — 렌더 불가", file=sys.stderr)
+        return
+    states, outs = run_detector(frames)
+    cap = cv2.VideoCapture(qcam)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 20.0
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    vw = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    i = 0
+    while True:
+        ok, fr = cap.read()
+        if not ok:
+            break
+        idx = min(i, len(outs) - 1)
+        s = states[idx]
+        d = outs[idx].diagnostics
+        cv2.circle(fr, (44, 44), 24, STATE_BGR[s], -1)
+        cv2.putText(fr, STATE_NAME[s], (78, 54), cv2.FONT_HERSHEY_SIMPLEX, 1.0, STATE_BGR[s], 2)
+        info = [f"x_end:{d['model_x_end']}m", f"v:{d['v_ego']}", f"would_alert:{d['would_alert']}",
+                f"lead:{d['has_lead']}", f"cc:{d['cc_enabled']}"]
+        for k, ln in enumerate(info):
+            cv2.putText(fr, ln, (12, 92 + k * 26), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+        vw.write(fr)
+        i += 1
+    cap.release()
+    vw.release()
+    n_red = sum(1 for s in states if s == 1)
+    n_green = sum(1 for s in states if s == 2)
+    print(f"렌더 완료: {out_path} ({i} 프레임, RED {n_red}f / GREEN {n_green}f)")
+
+
 def interactive(seg_dir, out_path):
     import pygame
     import cv2
@@ -61,7 +100,6 @@ def interactive(seg_dir, out_path):
     onsets = detect_red_onsets(states)
     cap = cv2.VideoCapture(qcam) if qcam else None
     n_video = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if cap else len(frames)
-
     pygame.init()
     screen = pygame.display.set_mode((1280, 720))
     font = pygame.font.SysFont("consolas", 20)
@@ -84,18 +122,16 @@ def interactive(seg_dir, out_path):
         lines = [
             f"frame {idx}/{len(frames)-1}",
             f"STATE: {out.state.name}",
-            f"x_stop: {out.x_stop:.1f} m",
-            f"model_x: {d['model_x']}  model_v: {d['model_v']}",
-            f"y_end: {d['y_end']}  v_ego: {d['v_ego']}",
-            f"a_ego: {d['a_ego']}  steer: {d['steer']}",
-            f"stop_cnt: {d['stop_cnt']}  start_cnt: {d['start_cnt']}",
-            f"guards: {d['guards']}",
+            f"x_end: {d['model_x_end']} m",
+            f"v_ego: {d['v_ego']}  armed: {d['armed']}",
+            f"has_lead: {d['has_lead']}  cc: {d['cc_enabled']}",
+            f"green_timer: {d['green_timer']}",
             "",
             f"onsets: {len(onsets)}  labeled: {len(labels)}",
             "1=정상 2=오탐 m=미검출 s=저장 q=종료",
         ]
-        color = {"RED": (220, 60, 60), "GREEN": (60, 200, 60), "OFF": (160, 160, 160)}[out.state.name]
-        pygame.draw.circle(screen, color, (1180, 40), 18)
+        rgb = {"OFF": (160, 160, 160), "RED": (220, 60, 60), "GREEN": (60, 200, 60)}[out.state.name]
+        pygame.draw.circle(screen, rgb, (1180, 40), 18)
         for k, ln in enumerate(lines):
             screen.blit(font.render(ln, True, (230, 230, 230)), (820, 20 + k * 26))
         pygame.display.flip()
@@ -146,6 +182,7 @@ def main():
     ap.add_argument("seg_dir", help="세그먼트 디렉터리, 또는 'batch'")
     ap.add_argument("--out", default="tl_labels.json", help="라벨 출력 / batch 시 부모 디렉터리")
     ap.add_argument("--summary", action="store_true")
+    ap.add_argument("--render", metavar="OUT.MP4", help="영상에 RED/GREEN 오버레이 출력")
     a = ap.parse_args()
     if a.seg_dir == "batch":
         batch(a.out)
@@ -153,7 +190,9 @@ def main():
     if not os.path.isdir(a.seg_dir):
         print("세그먼트 디렉터리 없음", file=sys.stderr)
         sys.exit(1)
-    if a.summary:
+    if a.render:
+        render(a.seg_dir, a.render)
+    elif a.summary:
         summary(a.seg_dir)
     else:
         interactive(a.seg_dir, a.out)

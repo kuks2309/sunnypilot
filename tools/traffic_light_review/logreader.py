@@ -16,7 +16,6 @@ from dataclasses import dataclass
 
 from sunnypilot.selfdrive.traffic_light.detector import DetectorInputs
 
-NO_LEAD_DREL = 250.0
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _CEREAL = os.path.join(_REPO_ROOT, "cereal")
 _EVENT_SCHEMA = None
@@ -85,9 +84,10 @@ def _read_rlog(path):
 
 
 def frames_from_events(events):
-    """이벤트 시퀀스 → Frame 리스트. modelV2 마다 직전 carState/radarState 결합."""
+    """이벤트 시퀀스 → Frame 리스트. modelV2 마다 직전 carState/radarState/carControl 결합."""
     cs = None
     radar = None
+    cc = None
     frames = []
     for e in events:
         w = e.which()
@@ -95,19 +95,18 @@ def frames_from_events(events):
             cs = e.carState
         elif w == "radarState":
             radar = e.radarState
+        elif w == "carControl":
+            cc = e.carControl
         elif w == "modelV2":
             m = e.modelV2
-            d_rel = NO_LEAD_DREL
-            if radar is not None and getattr(radar.leadOne, "status", False):
-                d_rel = radar.leadOne.dRel
+            has_lead = bool(radar is not None and getattr(radar.leadOne, "status", False))
             inputs = DetectorInputs(
                 model_pos_x=list(m.position.x),
-                model_pos_y=list(m.position.y),
-                model_vel_x=list(m.velocity.x),
                 v_ego=cs.vEgo if cs else 0.0,
-                a_ego=cs.aEgo if cs else 0.0,
-                steering_angle_deg=cs.steeringAngleDeg if cs else 0.0,
-                d_rel=d_rel,
+                standstill=bool(cs.standstill) if cs else True,
+                has_lead=has_lead,
+                gas_pressed=bool(cs.gasPressed) if cs else False,
+                cc_enabled=bool(cc.enabled) if cc else False,
             )
             frames.append(Frame(e.logMonoTime, inputs, getattr(m, "frameId", 0)))
     return frames

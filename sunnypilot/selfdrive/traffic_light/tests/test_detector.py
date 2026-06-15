@@ -1,8 +1,20 @@
-import math
-
 from sunnypilot.selfdrive.traffic_light.detector import (
-    TrafficLightState, DetectorInputs, DetectorOutput, TrafficLightDetector,
+    TrafficLightState, DetectorInputs, TrafficLightDetector,
 )
+
+
+def _frame(model_x_end, *, v_ego, standstill, has_lead=False, gas=False, cc=False):
+    px = [0.0] * 32 + [float(model_x_end)]
+    return DetectorInputs(px, v_ego=v_ego, standstill=standstill,
+                          has_lead=has_lead, gas_pressed=gas, cc_enabled=cc)
+
+
+def _moving(model_x_end=100.0):
+    return _frame(model_x_end, v_ego=10.0, standstill=False)
+
+
+def _stopped(model_x_end, **kw):
+    return _frame(model_x_end, v_ego=0.0, standstill=True, **kw)
 
 
 def test_state_enum_values():
@@ -11,50 +23,41 @@ def test_state_enum_values():
     assert TrafficLightState.GREEN.value == 2
 
 
-def test_detector_constructs():
+def test_moving_is_off():
     d = TrafficLightDetector()
-    assert d.state is TrafficLightState.OFF
+    assert d.update(_moving()).state is TrafficLightState.OFF
 
 
-def _inputs(stopping: bool, v_ego=15.0, steer=0.0, a_ego=0.0, d_rel=250.0):
-    # stopping=True: 예측 path가 가까이서 멈춤(짧은 x, 낮은 v)
-    if stopping:
-        px = [min(40.0, i * 1.3) for i in range(33)]   # ~40m에서 포화
-        vx = [max(0.0, v_ego - i * 1.0) for i in range(33)]  # 끝에서 0
-    else:
-        px = [i * 7.0 for i in range(33)]              # 계속 전진
-        vx = [v_ego for _ in range(33)]
-    py = [0.0 for _ in range(33)]
-    return DetectorInputs(px, py, vx, v_ego, a_ego, steer, d_rel)
-
-
-def test_red_on_stopping_trajectory():
+def test_red_when_stopped_path_short():
     d = TrafficLightDetector()
-    out = None
-    for _ in range(5):  # 디바운스 통과
-        out = d.update(_inputs(stopping=True))
+    out = d.update(_stopped(10.0))           # 정차 + 짧은 경로 → 대기(RED)
     assert out.state is TrafficLightState.RED
-    assert out.x_stop > 0.0
 
 
-def test_off_on_cruising_trajectory():
+def test_green_when_stopped_path_opens():
     d = TrafficLightDetector()
-    out = d.update(_inputs(stopping=False))
-    assert out.state is TrafficLightState.OFF
-
-
-def test_steer_guard_suppresses_red():
-    d = TrafficLightDetector()
+    d.update(_stopped(10.0))                  # 대기
     out = None
-    for _ in range(5):
-        out = d.update(_inputs(stopping=True, steer=30.0))
-    assert out.state is not TrafficLightState.RED
-    assert "steer" in out.diagnostics["guards"]
+    for _ in range(10):                       # 경로 열림 0.3s 유지 → GREEN
+        out = d.update(_stopped(120.0))
+    assert out.state is TrafficLightState.GREEN
 
 
-def test_regen_guard_suppresses_red():
+def test_would_alert_true_when_manual_no_lead():
     d = TrafficLightDetector()
+    d.update(_moving())                       # 움직였다가
     out = None
-    for _ in range(5):
-        out = d.update(_inputs(stopping=True, a_ego=-1.5))
-    assert "a_ego_regen" in out.diagnostics["guards"]
+    for _ in range(50):                       # 정차(recent_moving 해제)+경로열림+수동+앞차X
+        out = d.update(_stopped(120.0))
+    assert out.state is TrafficLightState.GREEN
+    assert out.diagnostics["would_alert"] is True
+
+
+def test_would_alert_false_when_engaged():
+    d = TrafficLightDetector()
+    d.update(_moving())
+    out = None
+    for _ in range(50):                       # openpilot 개입중 → 알림 게이트 막힘
+        out = d.update(_stopped(120.0, cc=True))
+    assert out.state is TrafficLightState.GREEN     # 표시상태는 GREEN
+    assert out.diagnostics["would_alert"] is False  # 실제 알림은 안 울림
