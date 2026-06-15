@@ -6,6 +6,8 @@ CarrotPilot `selfdrive/carrot/carrot_functions.py::check_model_stopping` 포팅.
 from dataclasses import dataclass, field
 from enum import IntEnum
 
+import numpy as np
+
 DT_MDL = 0.05  # modelV2 주기(20Hz)
 
 # --- 튜닝 상수 (CarrotPilot 포팅값, 검증 후 조정) ---
@@ -56,5 +58,54 @@ class TrafficLightDetector:
         self.start_sign_count = 0
         self.x_stop = 0.0
 
+    def _stop_sign(self, inp: DetectorInputs) -> bool:
+        x = inp.model_pos_x
+        y = inp.model_pos_y
+        v = inp.model_vel_x
+        model_x = x[-1]            # 예측 총 전진거리
+        model_v = v[-1]            # 예측 종단 속도
+        v0 = v[0]
+        v_ego_kph = inp.v_ego * 3.6
+        if v_ego_kph < STOP_VEGO_KPH_LOW:
+            return model_x < STOP_MODELX_LOW and model_v < STOP_MODELV_LOW
+        if v_ego_kph < STOP_VEGO_KPH_HIGH:
+            x_thresh = float(np.interp(v0 * 3.6, STOP_MODELX_V_BP, STOP_MODELX_V_V))
+            return (model_x < inp.d_rel - STOP_DREL_MARGIN
+                    and model_x < x_thresh
+                    and ((model_v < STOP_MODELV_MID) or (model_v < v0 * STOP_MODELV_RATIO))
+                    and abs(y[-1]) < STOP_LATERAL_MAX)
+        return False  # ~82km/h 이상 비활성
+
     def update(self, inp: DetectorInputs) -> DetectorOutput:
-        raise NotImplementedError
+        guards = []
+        if abs(inp.steering_angle_deg) > GUARD_STEER_DEG:
+            guards.append("steer")
+        if inp.a_ego < GUARD_AEGO:
+            guards.append("a_ego_regen")
+
+        raw_stop = self._stop_sign(inp) and not guards
+        if raw_stop:
+            self.stop_sign_count += 1
+            self.start_sign_count = 0
+        else:
+            self.start_sign_count += 1
+            self.stop_sign_count = 0
+
+        if self.stop_sign_count * DT_MDL > RED_DEBOUNCE_S and self.stop_sign_count > 0:
+            self.state = TrafficLightState.RED
+        elif self.start_sign_count * DT_MDL > GREEN_DEBOUNCE_S:
+            self.state = TrafficLightState.GREEN if self.state is TrafficLightState.RED else TrafficLightState.OFF
+
+        self.x_stop = inp.model_pos_x[-1]
+        diag = {
+            "model_x": round(inp.model_pos_x[-1], 1),
+            "model_v": round(inp.model_vel_x[-1], 2),
+            "y_end": round(inp.model_pos_y[-1], 2),
+            "v_ego": round(inp.v_ego, 2),
+            "a_ego": round(inp.a_ego, 2),
+            "steer": round(inp.steering_angle_deg, 1),
+            "stop_cnt": self.stop_sign_count,
+            "start_cnt": self.start_sign_count,
+            "guards": guards,
+        }
+        return DetectorOutput(self.state, self.x_stop, diag)
