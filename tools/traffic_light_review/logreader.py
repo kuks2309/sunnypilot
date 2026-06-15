@@ -63,13 +63,25 @@ def _load_event_schema():
     return _EVENT_SCHEMA
 
 
+def _safe_iter(reader):
+    """capnp 스트림 끝 truncation(불완전 세그먼트)에서 예외 대신 정상 종료."""
+    it = iter(reader)
+    while True:
+        try:
+            yield next(it)
+        except StopIteration:
+            return
+        except Exception:  # capnp KjException: Message ends prematurely
+            return
+
+
 def _read_rlog(path):
     import zstandard
     Event = _load_event_schema()
     raw = open(path, "rb").read()
     if path.endswith(".zst"):
         raw = zstandard.ZstdDecompressor().stream_reader(io.BytesIO(raw)).read()
-    return Event.read_multiple_bytes(raw)
+    return _safe_iter(Event.read_multiple_bytes(raw))
 
 
 def frames_from_events(events):

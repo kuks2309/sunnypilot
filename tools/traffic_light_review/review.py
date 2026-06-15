@@ -40,7 +40,7 @@ def batch(parent_dir):
             continue
         try:
             frames, _ = load_segment(s)
-        except FileNotFoundError:
+        except Exception:   # 잘린/손상 rlog 세그먼트 격리
             continue
         states, _ = run_detector(frames)
         per_seg[os.path.basename(s)] = detect_red_onsets(states)
