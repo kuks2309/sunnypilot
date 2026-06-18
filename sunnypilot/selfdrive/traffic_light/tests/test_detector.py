@@ -61,3 +61,10 @@ def test_would_alert_false_when_engaged():
         out = d.update(_stopped(120.0, cc=True))
     assert out.state is TrafficLightState.GREEN     # 표시상태는 GREEN
     assert out.diagnostics["would_alert"] is False  # 실제 알림은 안 울림
+
+
+def test_empty_model_path_is_off():
+    d = TrafficLightDetector()
+    inp = DetectorInputs([], v_ego=0.0, standstill=True,
+                         has_lead=False, gas_pressed=False, cc_enabled=False)
+    assert d.update(inp).state is TrafficLightState.OFF

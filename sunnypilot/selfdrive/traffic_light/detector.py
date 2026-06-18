@@ -51,6 +51,11 @@ class TrafficLightDetector:
         self.x_stop = 0.0
 
     def update(self, inp: DetectorInputs) -> DetectorOutput:
+        # 방어: 빈/짧은 모델경로(오프라인 도구 경로 포함) — OFF 반환
+        if not inp.model_pos_x:
+            self.state = TrafficLightState.OFF
+            return DetectorOutput(self.state, 0.0, {"model_x_end": 0.0, "armed": False})
+
         moving = (not inp.standstill) and inp.v_ego > MOVING_VEGO
         if moving:
             self.frames_since_moving = 0

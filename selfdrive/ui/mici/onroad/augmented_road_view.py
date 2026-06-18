@@ -240,6 +240,9 @@ class AugmentedRoadView(CameraView):
       self._alert_renderer.render(self._content_rect)
     self._hud_renderer.render(self._content_rect)
 
+    # 신호등 RED/GREEN 인디케이터 (카메라 영역 내 — scissor 클리핑 안에서 렌더)
+    self._traffic_light_indicator.render(self._content_rect)
+
     # Draw fake rounded border
     rl.draw_rectangle_rounded_lines_ex(self._content_rect, 0.2 * 1.02, 10, 50, rl.BLACK)
 
@@ -249,7 +252,6 @@ class AugmentedRoadView(CameraView):
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
     self._confidence_ball.render(self.rect)
-    self._traffic_light_indicator.render(self._content_rect)
 
     self._bookmark_icon.render(self.rect)
 
