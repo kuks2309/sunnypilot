@@ -10,7 +10,7 @@ from openpilot.selfdrive.ui.mici.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
-from openpilot.selfdrive.ui.mici.onroad.traffic_light_indicator import TrafficLightIndicator
+from openpilot.selfdrive.ui.onroad.traffic_light_indicator import TrafficLightIndicator
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent
 from openpilot.system.ui.widgets.label import UnifiedLabel
