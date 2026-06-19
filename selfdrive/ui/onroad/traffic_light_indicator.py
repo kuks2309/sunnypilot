@@ -65,9 +65,9 @@ class TrafficLightIndicator(Widget):
                              f"{int(self.rect.width)},{int(self.rect.height)})")
 
     def _render(self, _):
-        # 진단: state 무관 항상 화면 정중앙에 큰 점(색=state)
+        # 진단: state 무관 항상 그림(색=state). 위치=좌측 중앙(요청)
         color = DIAG_COLOR.get(self._state, rl.Color(255, 0, 255, 255))  # 핑크 = unknown
-        cx = int(self.rect.x + self.rect.width / 2)
+        cx = int(self.rect.x + 90)
         cy = int(self.rect.y + self.rect.height / 2)
         rl.draw_circle(cx, cy, DIAG_RADIUS, color)
         rl.draw_circle_lines(cx, cy, DIAG_RADIUS, rl.BLACK)
