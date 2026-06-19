@@ -87,11 +87,19 @@ class CruiseLayout(Widget):
       description=tr("Enable toggle to allow the model to determine when to use sunnypilot ACC or sunnypilot End to End Longitudinal."),
       param="DynamicExperimentalControl")
 
+    self.comfort_brake_item = option_item_sp(
+      title=tr("Comfort Brake"),
+      description=tr("Lower values start slowing earlier when approaching a lead. Follow gap and max braking are unchanged."),
+      param="ComfortBrake",
+      value_map={v: v / 10.0 for v in range(15, 31)},
+      min_value=15, max_value=30, value_change_step=1)
+
     items = [
       self.icbm_toggle,
       self.dec_toggle,
       self.scc_v_toggle,
       self.scc_m_toggle,
+      self.comfort_brake_item,
       self.custom_acc_toggle,
       self.custom_acc_short_increment,
       self.custom_acc_long_increment,
