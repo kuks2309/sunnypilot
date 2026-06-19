@@ -94,12 +94,27 @@ class CruiseLayout(Widget):
       value_map={v: v / 10.0 for v in range(15, 31)},
       min_value=15, max_value=30, value_change_step=1)
 
+    self.stop_distance_low_item = option_item_sp(
+      title=tr("Low-speed Stop Gap"),
+      description=tr("Standstill/low-speed following gap. Lower reduces cut-ins in traffic jams. High-speed gap unchanged."),
+      param="StopDistanceLow",
+      value_map={v: v / 10.0 for v in range(25, 61)},
+      min_value=25, max_value=60, value_change_step=1)
+
+    self.stop_distance_low_speed_item = option_item_sp(
+      title=tr("Low-speed Gap Threshold (km/h)"),
+      description=tr("Below this speed the stop gap is gradually reduced toward the Low-speed Stop Gap."),
+      param="StopDistanceLowSpeed",
+      min_value=5, max_value=30, value_change_step=1)
+
     items = [
       self.icbm_toggle,
       self.dec_toggle,
       self.scc_v_toggle,
       self.scc_m_toggle,
       self.comfort_brake_item,
+      self.stop_distance_low_item,
+      self.stop_distance_low_speed_item,
       self.custom_acc_toggle,
       self.custom_acc_short_increment,
       self.custom_acc_long_increment,

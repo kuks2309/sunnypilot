@@ -28,7 +28,7 @@ MPC_SOURCES = (LongitudinalPlanSource.lead0, LongitudinalPlanSource.lead1, Longi
 
 X_DIM = 3
 U_DIM = 1
-PARAM_DIM = 7
+PARAM_DIM = 8
 COST_E_DIM = 5
 COST_DIM = COST_E_DIM + 1
 CONSTR_DIM = 4
@@ -84,8 +84,8 @@ def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard):
 def get_stopped_equivalence_factor(v_lead, comfort_brake=COMFORT_BRAKE):
   return (v_lead**2) / (2 * comfort_brake)
 
-def get_safe_obstacle_distance(v_ego, t_follow, comfort_brake=COMFORT_BRAKE):
-  return (v_ego**2) / (2 * comfort_brake) + t_follow * v_ego + STOP_DISTANCE
+def get_safe_obstacle_distance(v_ego, t_follow, comfort_brake=COMFORT_BRAKE, stop_distance=STOP_DISTANCE):
+  return (v_ego**2) / (2 * comfort_brake) + t_follow * v_ego + stop_distance
 
 def gen_long_model():
   model = AcadosModel()
@@ -113,7 +113,8 @@ def gen_long_model():
   lead_t_follow = SX.sym('lead_t_follow')
   lead_danger_factor = SX.sym('lead_danger_factor')
   comfort_brake = SX.sym('comfort_brake')
-  model.p = vertcat(a_min, a_max, x_obstacle, a_prev, lead_t_follow, lead_danger_factor, comfort_brake)
+  stop_distance = SX.sym('stop_distance')
+  model.p = vertcat(a_min, a_max, x_obstacle, a_prev, lead_t_follow, lead_danger_factor, comfort_brake, stop_distance)
 
   # dynamics model
   f_expl = vertcat(v_ego, a_ego, j_ego)
@@ -149,11 +150,12 @@ def gen_long_ocp():
   lead_t_follow = ocp.model.p[4]
   lead_danger_factor = ocp.model.p[5]
   comfort_brake = ocp.model.p[6]
+  stop_distance = ocp.model.p[7]
 
   ocp.cost.yref = np.zeros((COST_DIM, ))
   ocp.cost.yref_e = np.zeros((COST_E_DIM, ))
 
-  desired_dist_comfort = get_safe_obstacle_distance(v_ego, lead_t_follow, comfort_brake)
+  desired_dist_comfort = get_safe_obstacle_distance(v_ego, lead_t_follow, comfort_brake, stop_distance)
 
   # The main cost in normal operation is how close you are to the "desired" distance
   # from an obstacle at every timestep. This obstacle can be a lead car
@@ -179,7 +181,7 @@ def gen_long_ocp():
 
   x0 = np.zeros(X_DIM)
   ocp.constraints.x0 = x0
-  ocp.parameter_values = np.array([-1.2, 1.2, 0.0, 0.0, get_T_FOLLOW(), LEAD_DANGER_FACTOR, COMFORT_BRAKE])
+  ocp.parameter_values = np.array([-1.2, 1.2, 0.0, 0.0, get_T_FOLLOW(), LEAD_DANGER_FACTOR, COMFORT_BRAKE, STOP_DISTANCE])
 
 
   # We put all constraint cost weights to 0 and only set them at runtime
@@ -224,6 +226,9 @@ class LongitudinalMpc:
     self.source = LongitudinalPlanSource.cruise
     self._cb_params = Params()
     self.comfort_brake = COMFORT_BRAKE
+    self.stop_distance = STOP_DISTANCE
+    self._stop_low = 3.5
+    self._stop_low_speed = 15 / 3.6
     self._cb_frame = 0
 
   def reset(self):
@@ -325,8 +330,15 @@ class LongitudinalMpc:
       cb = self._cb_params.get("ComfortBrake")
       if cb is not None:
         self.comfort_brake = float(np.clip(int(cb) / 10.0, 1.0, 3.5))
+      sl = self._cb_params.get("StopDistanceLow")
+      if sl is not None:
+        self._stop_low = float(np.clip(int(sl) / 10.0, 2.5, 6.0))
+      sls = self._cb_params.get("StopDistanceLowSpeed")
+      if sls is not None:
+        self._stop_low_speed = float(np.clip(int(sls), 1, 40)) / 3.6
     self._cb_frame += 1
     v_ego = self.x0[1]
+    self.stop_distance = float(np.interp(v_ego, [0.0, self._stop_low_speed], [self._stop_low, STOP_DISTANCE]))
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)
@@ -344,7 +356,7 @@ class LongitudinalMpc:
     # TODO does this make sense when max_a is negative?
     v_upper = v_ego + (T_IDXS * CRUISE_MAX_ACCEL * 1.05)
     v_cruise_clipped = np.clip(v_cruise * np.ones(N+1), v_lower, v_upper)
-    cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, self.comfort_brake)
+    cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, self.comfort_brake, self.stop_distance)
 
     x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle])
     self.source = MPC_SOURCES[np.argmin(x_obstacles[0])]
@@ -361,6 +373,7 @@ class LongitudinalMpc:
     self.params[:,4] = t_follow
     self.params[:,5] = LEAD_DANGER_FACTOR
     self.params[:,6] = self.comfort_brake
+    self.params[:,7] = self.stop_distance
 
     self.run()
     if (np.any(lead_xv_0[FCW_IDXS,0] - self.x_sol[FCW_IDXS,0] < CRASH_DISTANCE) and
