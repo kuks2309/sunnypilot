@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """speed_camera_warnd — 단속카메라 거리경고/감속 데몬 (얇은 런타임 글루).
 
-내장 GNSS(gpsLocationExternal)를 저주파로 구독해 SpeedCameraLogic(순수 모듈)에 넘기고,
+내장 GNSS(gpsLocation/gpsLocationExternal, ublox 유무로 자동선택)를 저주파로 구독해 SpeedCameraLogic 에 넘기고,
 결과 payload 를 customReservedRawData0(raw bytes)로 발행한다.
 무거운 일(43k DB 격자검색)은 전부 여기서만 → 안전 루프(selfdrived 100Hz)에 부담 0.
 결정 로직은 warn_logic.py 에 분리(cereal 비의존)되어 PC에서 SIL 검증 가능.
@@ -12,6 +12,7 @@
 import json
 
 from cereal import messaging
+from openpilot.common.gps import get_gps_location_service
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper, config_realtime_process
 from openpilot.common.swaglog import cloudlog
@@ -29,9 +30,11 @@ def main():
     cloudlog.info(f"speed_camera_warnd: {len(db)} cameras, refdate={db.refdate}, loaded={db.loaded}")
 
     logic = SpeedCameraLogic(db, RATE_HZ)
-    sm = messaging.SubMaster(['gpsLocationExternal'])
-    pm = messaging.PubMaster(['customReservedRawData0'])
     params = Params()
+    gps_service = get_gps_location_service(params)  # ublox 유무에 따라 gpsLocationExternal/gpsLocation
+    cloudlog.info(f"speed_camera_warnd: gps service = {gps_service}")
+    sm = messaging.SubMaster([gps_service])
+    pm = messaging.PubMaster(['customReservedRawData0'])
     rk = Ratekeeper(RATE_HZ, print_delay_threshold=None)
 
     enabled = decel_enabled = False
@@ -54,13 +57,15 @@ def main():
             except (ValueError, TypeError):
                 enabled, decel_enabled, sound = False, False, 1
 
-        gps = sm['gpsLocationExternal']
-        have_fix = sm.valid['gpsLocationExternal'] and (gps.latitude != 0.0 or gps.longitude != 0.0)
+        gps = sm[gps_service]
+        have_fix = sm.valid[gps_service] and (gps.latitude != 0.0 or gps.longitude != 0.0)
 
         payload = logic.update(gps.latitude, gps.longitude, gps.bearingDeg, max(gps.speed, 0.0),
                                enabled, decel_enabled, sound, have_fix)
 
-        msg = messaging.new_message('customReservedRawData0', valid=True)
+        # customReservedRawData0 은 Data(raw bytes) 필드 → new_message 의 init(service) 가 안 먹힘.
+        # service=None 으로 빈 Event 생성 후 Data 필드에 직접 대입.
+        msg = messaging.new_message(None, valid=True)
         msg.customReservedRawData0 = json.dumps(payload).encode()
         pm.send('customReservedRawData0', msg)
 
