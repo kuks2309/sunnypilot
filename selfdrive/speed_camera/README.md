@@ -39,6 +39,12 @@ gpsLocationExternal(GNSS) ─5Hz─▶ speed_camera_warnd ─customReservedRawDa
 - **Speed Camera: Slow Down (when engaged)**: engage 중 자동감속 on/off (`SpeedCameraDecelEnabled`, 기본 off)
 - **Speed Camera Slow Down: Start Margin**: 감속 시작 여유 거리 0/15/30/50/80 m (`SpeedCameraDecelMargin`, 기본 15m). 클수록 더 일찍 시작. 감속 강도(=차간거리 COMFORT_BRAKE 2.0)는 불변.
 
+## 표시 언어 / 폰트 (중요)
+onroad UI(raylib)는 비트맵 Inter 폰트(라틴 글리프만)라 **한글이 렌더되지 않는다**. 한글은 `unifont.fnt`에만 있고
+`font_fallback()`이 UI 언어=ko(UNIFONT_LANGUAGES)일 때만 폴백한다(`system/ui/lib/application.py`).
+→ **HUD/alert 문구는 영문 ASCII로 작성**한다(현재: `Speed Cam` / `SLOW DOWN` / `Section Cam`).
+한글로 보고 싶으면 설정에서 표시 언어를 한국어로 바꾸면 alert도 UNIFONT로 한글 렌더됨.
+
 ## 데이터 갱신 (반기마다)
 ```
 # PC에서:
