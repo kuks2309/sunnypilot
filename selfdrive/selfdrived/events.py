@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import math
 import os
 
@@ -77,6 +78,42 @@ def startup_master_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubM
 
 def below_engage_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   return NoEntryAlert(f"Drive above {get_display_speed(CP.minEnableSpeed, metric)} to engage")
+
+
+# 단속카메라 거리경고 — speed_camera_warnd 가 customReservedRawData0 로 보낸 상태를 읽어
+# engage 여부와 무관(ET.PERMANENT)하게 화면+소리 경고를 만든다. snd/chime 으로 소리 선택·단발 제어.
+SPEED_CAM_SOUND = {
+  0: AudibleAlert.none,
+  1: AudibleAlert.warningSoft,
+  2: AudibleAlert.warningImmediate,
+  3: AudibleAlert.prompt,
+}
+
+def speed_camera_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  data: dict = {}
+  try:
+    raw = sm['customReservedRawData0']
+    if raw:
+      data = json.loads(bytes(raw))
+  except (ValueError, KeyError, TypeError):
+    pass
+
+  stage = data.get("s", 0)
+  dist = data.get("d", 0)
+  limit = data.get("l", 0)
+  flags = data.get("f", 0)
+  audible = SPEED_CAM_SOUND.get(data.get("snd", 1), AudibleAlert.warningSoft) if data.get("c", 0) else AudibleAlert.none
+
+  head = "구간단속" if flags == 2 else ("구간단속 종료" if flags == 3 else "단속카메라")
+  limit_txt = f"제한 {limit}" if limit else head
+
+  if stage == 2:
+    return Alert(f"감속! {limit_txt}", f"{dist}m",
+                 AlertStatus.userPrompt, AlertSize.small,
+                 Priority.MID, VisualAlert.none, audible, 0.5)
+  return Alert(f"{head}  {limit}" if limit else head, f"{dist}m",
+               AlertStatus.normal, AlertSize.small,
+               Priority.LOW, VisualAlert.none, audible, 0.5)
 
 
 def below_steer_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
@@ -223,6 +260,10 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.actuatorsApiUnavailable: {},
 
   # ********** events only containing alerts displayed in all states **********
+
+  EventName.speedCameraWarning: {
+    ET.PERMANENT: speed_camera_alert,
+  },
 
   EventName.joystickDebug: {
     ET.WARNING: joystick_alert,

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import time
 import threading
@@ -99,7 +100,7 @@ class SelfdriveD(CruiseHelper):
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'livePose', 'liveDelay',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark', 'audioFeedback',
-                                   'lateralManeuverPlan', 'modelDataV2SP', 'longitudinalPlanSP'] + \
+                                   'lateralManeuverPlan', 'modelDataV2SP', 'longitudinalPlanSP', 'customReservedRawData0'] + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
                                   ignore_alive=ignore, ignore_avg_freq=ignore,
                                   ignore_valid=ignore, frequency=int(1/DT_CTRL))
@@ -178,6 +179,14 @@ class SelfdriveD(CruiseHelper):
 
     self.events.clear()
     self.events_sp.clear()
+
+    # 단속카메라 거리경고: speed_camera_warnd 가 보낸 stage>0 이면 표시(ET.PERMANENT → engage 무관)
+    try:
+      raw = self.sm['customReservedRawData0']
+      if raw and json.loads(bytes(raw)).get("s", 0) > 0:
+        self.events.add(EventName.speedCameraWarning)
+    except (ValueError, TypeError):
+      pass
 
     if self.sm['controlsState'].lateralControlState.which() == 'debugState':
       self.events.add(EventName.joystickDebug)
