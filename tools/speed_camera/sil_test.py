@@ -98,6 +98,26 @@ def run(db, cam_lat, cam_lon, label, start_dist, v0_kph, warn, decel, engaged, e
     return fired_headsup, fired_decel, v_at_camera
 
 
+def continuity_test(db, cam_lat, cam_lon):
+    """래치 검증: 카메라를 잡은 뒤 진행방향을 시야각 밖(95°)으로 틀어도 통과 전까지 stage>=1 유지."""
+    logic = SpeedCameraLogic(db, RATE)
+    v = 80 / 3.6
+    d = 700.0
+    seen_warn = False
+    gap_after_warn = False
+    while d > 5:
+        lat, lon = offset_south(cam_lat, cam_lon, d)
+        heading = 95.0 if d < 500 else 0.0   # 래치(≤600m) 후 카메라를 전방 시야각 밖으로
+        s = logic.update(lat, lon, heading, v, True, False, 1, True)["s"]
+        if d <= 580:
+            if s >= 1:
+                seen_warn = True
+            elif seen_warn:
+                gap_after_warn = True
+        d -= v * DT
+    return seen_warn and not gap_after_warn
+
+
 def find_camera(db, want_flags, want_limit=None):
     for i in range(len(db)):
         if db.flags[i] == want_flags and (want_limit is None or db.limits[i] == want_limit):
@@ -145,6 +165,12 @@ def main():
             fails.append(f"구간단속 유지 부족: {vcam3*3.6:.0f} > {st}+3")
     else:
         print("\n[경고] SECTION_END 카메라 없음 — 구간단속 시나리오 생략")
+
+    # 4) 래치 연속표시 (곡선 모사 — 시야각 밖으로 틀어도 통과 전까지 유지)
+    ok = continuity_test(db, flat, flon)
+    print(f"\n=== 래치 연속표시(곡선 모사) FIXED {flim}: {'유지됨' if ok else '끊김!'} ===")
+    if not ok:
+        fails.append("래치: 시야각 밖에서 경고 끊김")
 
     print("\n" + "=" * 50)
     if fails:
