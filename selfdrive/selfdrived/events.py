@@ -104,14 +104,15 @@ def speed_camera_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMas
   flags = data.get("f", 0)
   audible = SPEED_CAM_SOUND.get(data.get("snd", 1), AudibleAlert.warningSoft) if data.get("c", 0) else AudibleAlert.none
 
-  head = "구간단속" if flags == 2 else ("구간단속 종료" if flags == 3 else "단속카메라")
-  limit_txt = f"제한 {limit}" if limit else head
+  # 영문 고정(기본 Inter 폰트로 깨짐 없이 렌더 — 한글은 UNIFONT 필요)
+  head = "Section Cam" if flags in (2, 3) else "Speed Cam"
+  lim = f" {limit}" if limit else ""
 
   if stage == 2:
-    return Alert(f"감속! {limit_txt}", f"{dist}m",
+    return Alert(f"SLOW DOWN{lim}", f"{dist} m",
                  AlertStatus.userPrompt, AlertSize.small,
                  Priority.MID, VisualAlert.none, audible, 0.5)
-  return Alert(f"{head}  {limit}" if limit else head, f"{dist}m",
+  return Alert(f"{head}{lim}", f"{dist} m",
                AlertStatus.normal, AlertSize.small,
                Priority.LOW, VisualAlert.none, audible, 0.5)
 
