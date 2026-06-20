@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """speed_camera_warnd — 단속카메라 거리경고/감속 데몬 (얇은 런타임 글루).
 
-내장 GNSS(gpsLocation/gpsLocationExternal, ublox 유무로 자동선택)를 저주파로 구독해 SpeedCameraLogic 에 넘기고,
+칼만 융합 위치(liveLocationKalman, raw GPS보다 정확·터널 dead-reckoning)를 저주파로 구독해 SpeedCameraLogic 에 넘기고,
 결과 payload 를 customReservedRawData0(raw bytes)로 발행한다.
 무거운 일(43k DB 격자검색)은 전부 여기서만 → 안전 루프(selfdrived 100Hz)에 부담 0.
 결정 로직은 warn_logic.py 에 분리(cereal 비의존)되어 PC에서 SIL 검증 가능.
@@ -10,9 +10,9 @@
 - plannerd/SLA: payload.dl/dd → 카메라 제한속도 fail-safe 주입 → engage 중에만 감속
 """
 import json
+import math
 
 from cereal import messaging
-from openpilot.common.gps import get_gps_location_service
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper, config_realtime_process
 from openpilot.common.swaglog import cloudlog
@@ -31,9 +31,8 @@ def main():
 
     logic = SpeedCameraLogic(db, RATE_HZ)
     params = Params()
-    gps_service = get_gps_location_service(params)  # ublox 유무에 따라 gpsLocationExternal/gpsLocation
-    cloudlog.info(f"speed_camera_warnd: gps service = {gps_service}")
-    sm = messaging.SubMaster([gps_service])
+    # 위치는 칼만 융합(liveLocationKalman) 사용 — raw GPS보다 정확하고, 터널 등 음영에서 IMU dead-reckoning 유지
+    sm = messaging.SubMaster(['liveLocationKalman'])
     pm = messaging.PubMaster(['customReservedRawData0'])
     rk = Ratekeeper(RATE_HZ, print_delay_threshold=None)
 
@@ -57,10 +56,16 @@ def main():
             except (ValueError, TypeError):
                 enabled, decel_enabled, sound = False, False, 1
 
-        gps = sm[gps_service]
-        have_fix = sm.valid[gps_service] and (gps.latitude != 0.0 or gps.longitude != 0.0)
+        llk = sm['liveLocationKalman']
+        pg = llk.positionGeodetic
+        vned = llk.velocityNED
+        have_fix = sm.alive['liveLocationKalman'] and llk.gpsOK and pg.valid
+        lat, lon = (pg.value[0], pg.value[1]) if pg.valid else (0.0, 0.0)
+        ve, vn = (vned.value[1], vned.value[0]) if vned.valid else (0.0, 0.0)
+        speed = math.hypot(ve, vn)                          # m/s
+        heading = (math.degrees(math.atan2(ve, vn)) + 360) % 360  # 진행방향(코스)
 
-        payload = logic.update(gps.latitude, gps.longitude, gps.bearingDeg, max(gps.speed, 0.0),
+        payload = logic.update(lat, lon, heading, speed,
                                enabled, decel_enabled, sound, have_fix)
 
         # customReservedRawData0 은 Data(raw bytes) 필드 → new_message 의 init(service) 가 안 먹힘.
