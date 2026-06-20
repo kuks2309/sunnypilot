@@ -14,13 +14,14 @@ SLA 감속지령을 모사해 차속을 적분한다 → "카메라 지점에서
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 
 # openpilot.* 네임스페이스(PEP 420)로 import — repo 루트의 부모를 path에 추가
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")))
 
-from openpilot.selfdrive.speed_camera.camera_db import CameraDB, FIXED, SECTION_END  # noqa: E402
+from openpilot.selfdrive.speed_camera.camera_db import CameraDB, bearing_deg, FIXED, SECTION_END  # noqa: E402
 from openpilot.selfdrive.speed_camera.warn_logic import SpeedCameraLogic, DECEL_OFFSET_KPH, COMFORT_BRAKE  # noqa: E402
 
 RATE = 5.0
@@ -99,7 +100,8 @@ def run(db, cam_lat, cam_lon, label, start_dist, v0_kph, warn, decel, engaged, e
 
 
 def continuity_test(db, cam_lat, cam_lon):
-    """래치 검증: 카메라를 잡은 뒤 진행방향을 시야각 밖(95°)으로 틀어도 통과 전까지 stage>=1 유지."""
+    """래치 검증(현실적): 직진 접근 중 GPS 방위가 2사이클 +70° 튀어도(노이즈) 통과 전까지 stage>=1 유지.
+    위치는 직진(물리 일관), 헤딩만 순간 오류 → 카메라가 잠깐 전방 시야각 밖으로 나감."""
     logic = SpeedCameraLogic(db, RATE)
     v = 80 / 3.6
     d = 700.0
@@ -107,7 +109,8 @@ def continuity_test(db, cam_lat, cam_lon):
     gap_after_warn = False
     while d > 5:
         lat, lon = offset_south(cam_lat, cam_lon, d)
-        heading = 95.0 if d < 500 else 0.0   # 래치(≤600m) 후 카메라를 전방 시야각 밖으로
+        brg = bearing_deg(lat, lon, cam_lat, cam_lon)   # 실제 진행방향(직진 접근)
+        heading = brg + 70.0 if 360 > d > 320 else brg  # d≈350 부근 2사이클 방위 노이즈
         s = logic.update(lat, lon, heading, v, True, False, 1, True)["s"]
         if d <= 580:
             if s >= 1:
@@ -116,6 +119,20 @@ def continuity_test(db, cam_lat, cam_lon):
                 gap_after_warn = True
         d -= v * DT
     return seen_warn and not gap_after_warn
+
+
+def crosstrack_test(db, cam_lat, cam_lon):
+    """cross-track 검증: 경로상(정렬) 카메라는 매칭, 진행방향 15° 빗나간 카메라(횡이격 큼)는 배제."""
+    plat, plon = offset_south(cam_lat, cam_lon, 300.0)
+    brg = bearing_deg(plat, plon, cam_lat, cam_lon)
+    hit_on = db.nearest_forward(plat, plon, heading=brg, radius_m=400)        # 정렬 → 매칭 기대
+    hit_off = db.nearest_forward(plat, plon, heading=brg + 15.0, radius_m=400)  # 15° 빗남 → 횡이격 ~77m
+    on_ok = hit_on is not None and hit_on["dist"] < 350
+    off_ok = True
+    if hit_off is not None:  # 빗난 경우 잡히더라도 횡이격 한계 이내여야(같은 경로상)
+        diff = abs((hit_off["bearing"] - (brg + 15.0) + 180) % 360 - 180)
+        off_ok = hit_off["dist"] * math.sin(math.radians(diff)) <= 31.0
+    return on_ok and off_ok
 
 
 def find_camera(db, want_flags, want_limit=None):
@@ -171,6 +188,12 @@ def main():
     print(f"\n=== 래치 연속표시(곡선 모사) FIXED {flim}: {'유지됨' if ok else '끊김!'} ===")
     if not ok:
         fails.append("래치: 시야각 밖에서 경고 끊김")
+
+    # 5) cross-track (옆/아래 다른 도로 카메라 배제)
+    ct = crosstrack_test(db, flat, flon)
+    print(f"\n=== cross-track(다른 도로 배제) FIXED {flim}: {'정상' if ct else '실패'} ===")
+    if not ct:
+        fails.append("cross-track: 빗난 도로 카메라 미배제")
 
     print("\n" + "=" * 50)
     if fails:

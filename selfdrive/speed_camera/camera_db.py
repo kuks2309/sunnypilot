@@ -24,6 +24,7 @@ NOWARN, FIXED, SECTION_START, SECTION_END = 0, 1, 2, 3
 
 CELL_DEG = 0.02  # 격자 한 변(도). ~2.2km
 EARTH_R = 6371000.0
+CROSS_TRACK_MAX = 30.0  # 진행 경로선에서 횡방향 이격 한계(m). 옆/아래 다른 도로 카메라 배제
 
 
 def haversine_m(lat1, lon1, lat2, lon2) -> float:
@@ -102,6 +103,9 @@ class CameraDB:
                     if heading is not None:
                         diff = abs((brg - heading + 180) % 360 - 180)
                         if diff > fov / 2:
+                            continue
+                        # 횡방향 이격: 다른 도로(옆/아래) 카메라 배제, 같은 경로상만 통과
+                        if d * math.sin(math.radians(diff)) > CROSS_TRACK_MAX:
                             continue
                     if best is None or d < best["dist"]:
                         best = {"dist": d, "limit": self.limits[i], "flags": self.flags[i],
