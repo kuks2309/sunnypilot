@@ -1,0 +1,4 @@
+# 원본/중간 산출물은 커밋하지 않는다(대용량). 런타임용 compact bin 만 커밋.
+speed_cameras.csv
+speed_cameras.json
+__pycache__/

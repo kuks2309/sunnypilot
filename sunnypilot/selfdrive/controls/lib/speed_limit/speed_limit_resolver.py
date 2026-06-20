@@ -4,6 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
+import json
 import time
 
 import cereal.messaging as messaging
@@ -67,6 +68,7 @@ class SpeedLimitResolver:
       self.params
     )
     self.offset_value = self.params.get("SpeedLimitValueOffset", return_default=True)
+    self._camera_decel_enabled = self.params.get_bool("SpeedCameraDecelEnabled")
 
     self.speed_limit = 0.
     self.speed_limit_last = 0.
@@ -95,6 +97,23 @@ class SpeedLimitResolver:
       self.is_metric = self.params.get_bool("IsMetric")
       self.offset_type = self.params.get("SpeedLimitOffsetType", return_default=True)
       self.offset_value = self.params.get("SpeedLimitValueOffset", return_default=True)
+      self._camera_decel_enabled = self.params.get_bool("SpeedCameraDecelEnabled")
+
+  def _get_camera_limit(self, sm: messaging.SubMaster) -> tuple[float, float]:
+    """단속카메라 감속 목표(m/s)와 거리(m). speed_camera_warnd 의 dl/dd. 비활성 시 (0, 0)."""
+    if not self._camera_decel_enabled:
+      return 0., 0.
+    try:
+      raw = sm['customReservedRawData0']
+      if not raw:
+        return 0., 0.
+      data = json.loads(bytes(raw))
+    except (ValueError, KeyError, TypeError):
+      return 0., 0.
+    dl = data.get("dl", 0)
+    if dl <= 0:
+      return 0., 0.
+    return dl * CV.KPH_TO_MS, float(data.get("dd", 0))
 
   def _get_speed_limit_offset(self) -> float:
     if self.offset_type == OffsetType.off:
@@ -175,6 +194,13 @@ class SpeedLimitResolver:
     source = self._get_source_solution_according_to_policy()
     speed_limit = self.limit_solutions[source] if source else 0.
     distance = self.distance_solutions[source] if source else 0.
+
+    # 단속카메라 제한속도 — fail-safe: 더 낮을 때만 적용(속도 상승 불가). SLA가 engage 게이트.
+    cam_limit, cam_dist = self._get_camera_limit(sm)
+    if cam_limit > 0. and (speed_limit <= 0. or cam_limit < speed_limit):
+      speed_limit = cam_limit
+      distance = cam_dist
+      source = SpeedLimitSource.car  # 표시용(별도 enum 추가 회피)
 
     return speed_limit, distance, source
 
