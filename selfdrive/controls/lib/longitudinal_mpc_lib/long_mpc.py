@@ -324,7 +324,7 @@ class LongitudinalMpc:
     lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau)
     return lead_xv
 
-  def update(self, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard):
+  def update(self, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard, lead_release=False):
     t_follow = get_T_FOLLOW(personality)
     if self._cb_frame % 100 == 0:
       cb = self._cb_params.get("ComfortBrake")
@@ -341,7 +341,13 @@ class LongitudinalMpc:
     self.stop_distance = float(np.interp(v_ego, [0.0, self._stop_low_speed], [self._stop_low, STOP_DISTANCE]))
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
 
-    lead_xv_0 = self.process_lead(radarstate.leadOne)
+    # Lane-change lead release: during a driver-requested lane change (gated in
+    # longitudinal_planner) ignore only the slow ORIGINAL-lane lead (leadOne) so the MPC
+    # accelerates to the target lane's flow speed (None -> "fake fast lead"). leadTwo is KEPT
+    # as a forward safety net (on Tesla it can track a vehicle already in the target lane;
+    # ccg/Gemini review). Restore happens when the planner clears the flag next frame.
+    lead_one = None if lead_release else radarstate.leadOne
+    lead_xv_0 = self.process_lead(lead_one)
     lead_xv_1 = self.process_lead(radarstate.leadTwo)
 
     # To estimate a safe distance from a moving lead, we calculate how much stopping

@@ -3,6 +3,7 @@ import math
 import numpy as np
 
 import cereal.messaging as messaging
+from cereal import log
 from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
 from openpilot.common.constants import CV
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -26,6 +27,11 @@ MIN_ALLOW_THROTTLE_SPEED = 2.5
 # Lookup table for turns
 _A_TOTAL_MAX_V = [1.7, 3.2]
 _A_TOTAL_MAX_BP = [20., 40.]
+
+# Lane-change lead release (see update()): never release a close lead, and require the
+# release condition to hold briefly before engaging (anti-oscillation). ccg/Gemini review.
+LC_RELEASE_MIN_DIST = 25.0   # m, do not release leadOne if closer than this
+LC_RELEASE_HOLD = 0.3        # s, sustained-clear required before release (instant disengage)
 
 def get_max_accel(v_ego):
   return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
@@ -55,6 +61,8 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.fcw = False
     self.dt = dt
     self.allow_throttle = True
+    self.lane_change_lead_release = False
+    self.lane_change_clear_time = 0.0
 
     self.a_desired = init_a
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
@@ -136,9 +144,40 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     if force_slow_decel:
       v_cruise = 0.0
 
+    # --- Lane-change lead release (supervised L2 + rear-collision avoidance) ---
+    # When the driver requests a lane change (laneChangeStarting) and the rear blind spot on
+    # the target side is clear, do not stay locked to the slow original-lane lead. Releasing it
+    # lets the car accelerate to the target lane's flow speed — how humans merge — and AVOIDS
+    # being rear-ended by faster traffic in the target lane. The driver (L2 supervisor) has
+    # confirmed the lane is safe to enter; a forward car in the new lane is handled by normal
+    # vision-lead re-acquisition after the merge. Accel stays bounded by accel_clip and v_cruise.
+    meta = sm['modelV2'].meta
+    lcd = meta.laneChangeDirection
+    if lcd == log.LaneChangeDirection.left:
+      target_bsm_clear = not sm['carState'].leftBlindspot
+    elif lcd == log.LaneChangeDirection.right:
+      target_bsm_clear = not sm['carState'].rightBlindspot
+    else:
+      target_bsm_clear = False  # fail-closed: unknown direction -> no release
+    lead_one = sm['radarState'].leadOne
+    # Raw condition: driver-requested lane change, target rear clear, and held back by a
+    # FAR slow lead. Proximity gate (LC_RELEASE_MIN_DIST) prevents accelerating into a close
+    # lead before the lateral move clears it (ccg/Gemini #1). leadTwo stays active in the MPC.
+    release_cond = bool(
+      meta.laneChangeState == log.LaneChangeState.laneChangeStarting
+      and target_bsm_clear
+      and lead_one.status and lead_one.vLead < v_cruise
+      and lead_one.dRel > LC_RELEASE_MIN_DIST
+    )
+    # Hysteresis: require sustained clear before engaging; disengage instantly on any block
+    # (BSM trip / state change) to avoid accel<->brake oscillation (ccg/Gemini #4).
+    self.lane_change_clear_time = self.lane_change_clear_time + self.dt if release_cond else 0.0
+    self.lane_change_lead_release = self.lane_change_clear_time >= LC_RELEASE_HOLD
+
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], v_cruise, personality=sm['selfdriveState'].personality)
+    self.mpc.update(sm['radarState'], v_cruise, personality=sm['selfdriveState'].personality,
+                    lead_release=self.lane_change_lead_release)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
