@@ -16,15 +16,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_BIN = os.path.join(HERE, "speed_cameras.bin")
 
 MAGIC = b"SCAM"
-REC = struct.Struct("<ffBB")
+REC = struct.Struct("<ffBBB")  # v2: lat, lon, limit, flags(category|dirmode), bearing(deg/2)
 HDR = struct.Struct("<4sIII")
 
-# 분류 플래그 (build_db.py 와 동일)
+# 분류(flags 하위2비트) / 방향모드 비트 (build_db.py 와 동일)
 NOWARN, FIXED, SECTION_START, SECTION_END = 0, 1, 2, 3
+DIR_AXIS, DIR_DIRECTED = 4, 8
 
 CELL_DEG = 0.02  # 격자 한 변(도). ~2.2km
 EARTH_R = 6371000.0
 CROSS_TRACK_MAX = 30.0  # 진행 경로선에서 횡방향 이격 한계(m). 옆/아래 다른 도로 카메라 배제
+DIR_TOL = 70.0          # DIRECTED: 내 진행방향과 카메라 방위 차가 이 이상이면 다른 방향 → 배제
+AXIS_TOL = 55.0         # AXIS: 도로 축(mod180)과 차가 이 이상이면 교차로 → 배제
 
 
 def haversine_m(lat1, lon1, lat2, lon2) -> float:
@@ -52,7 +55,9 @@ class CameraDB:
         self.lats: list[float] = []
         self.lons: list[float] = []
         self.limits: list[int] = []
-        self.flags: list[int] = []
+        self.flags: list[int] = []      # category (NOWARN/FIXED/SECTION_*)
+        self.dirmodes: list[int] = []   # 0=NONE / DIR_AXIS / DIR_DIRECTED
+        self.cam_brg: list[float] = []  # 카메라 방위(도). DIRECTED=주행방향, AXIS=도로축
         self.grid: dict[tuple[int, int], list[int]] = {}
         self.refdate = 0
         self.loaded = False
@@ -70,11 +75,13 @@ class CameraDB:
         self.refdate = refdate
         off = HDR.size
         for i in range(count):
-            lat, lon, limit, fl = REC.unpack_from(raw, off + i * REC.size)
+            lat, lon, limit, fl, bearing = REC.unpack_from(raw, off + i * REC.size)
             self.lats.append(lat)
             self.lons.append(lon)
             self.limits.append(limit)
-            self.flags.append(fl)
+            self.flags.append(fl & 3)                       # category
+            self.dirmodes.append(fl & (DIR_AXIS | DIR_DIRECTED))
+            self.cam_brg.append(bearing * 2.0)              # deg/2 → deg
             self.grid.setdefault(_cell(lat, lon), []).append(i)
         self.loaded = True
 
@@ -107,6 +114,15 @@ class CameraDB:
                         # 횡방향 이격: 다른 도로(옆/아래) 카메라 배제, 같은 경로상만 통과
                         if d * math.sin(math.radians(diff)) > CROSS_TRACK_MAX:
                             continue
+                        # 방향 게이트: 카메라 방위 vs 내 진행방향
+                        dm = self.dirmodes[i]
+                        if dm == DIR_DIRECTED:
+                            if abs((self.cam_brg[i] - heading + 180) % 360 - 180) > DIR_TOL:
+                                continue   # 반대편/교차 → 배제
+                        elif dm == DIR_AXIS:
+                            ax = abs((self.cam_brg[i] - heading + 180) % 360 - 180)
+                            if min(ax, 180 - ax) > AXIS_TOL:
+                                continue   # 도로축과 큰 각 = 교차로 → 배제
                     if best is None or d < best["dist"]:
                         best = {"dist": d, "limit": self.limits[i], "flags": self.flags[i],
                                 "bearing": brg, "lat": self.lats[i], "lon": self.lons[i]}

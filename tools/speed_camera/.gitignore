@@ -1,4 +1,15 @@
 # 원본/중간 산출물은 커밋하지 않는다(대용량). 런타임용 compact bin 만 커밋.
 speed_cameras.csv
 speed_cameras.json
+jjikcam_cameras.json
 __pycache__/
+speed_cameras_merged.csv
+speed_cameras_enriched.csv
+*.pbf
+confirmed_directions.csv
+osm_speed_cameras.json
+ours_only_isolated.csv
+jjik_only_truly_missing.csv
+limit_mismatch.csv
+jjikcam_only.csv
+speed_cameras_resolved.csv

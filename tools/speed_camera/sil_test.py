@@ -34,6 +34,27 @@ def offset_south(lat, lon, meters):
     return lat - meters / M_PER_DEG, lon
 
 
+def offset_along(lat, lon, dist, brg):
+    """진행방위 brg 로 카메라에 접근하는 dist(m) 뒤 지점(= brg+180 방향으로 dist)."""
+    back = math.radians((brg + 180) % 360)
+    dlat = dist * math.cos(back) / M_PER_DEG
+    dlon = dist * math.sin(back) / (M_PER_DEG * math.cos(math.radians(lat)))
+    return lat + dlat, lon + dlon
+
+
+def cam_dir(db, lat, lon):
+    """bin에 저장된 그 카메라의 방위(접근 방위로 사용). 없으면 0(북). 격자(0.02도) 탐색."""
+    cl, co = int(lat / 0.02), int(lon / 0.02)
+    best, bi = 1e9, -1
+    for a in (-1, 0, 1):
+        for o in (-1, 0, 1):
+            for i in db.grid.get((cl + a, co + o), ()):
+                dm = (db.lats[i] - lat) ** 2 + (db.lons[i] - lon) ** 2
+                if dm < best:
+                    best, bi = dm, i
+    return db.cam_brg[bi] if bi >= 0 else 0.0
+
+
 def sla_accel(v, dl_kph, dd_m):
     """SLA 감속지령 모사: dd>0면 카메라 지점에서 vf 도달하는 등감속, dd==0(구간유지)면 시정수 감속."""
     vf = dl_kph / 3.6
@@ -48,6 +69,7 @@ def sla_accel(v, dl_kph, dd_m):
 
 def run(db, cam_lat, cam_lon, label, start_dist, v0_kph, warn, decel, engaged, expect_hold=False):
     logic = SpeedCameraLogic(db, RATE)
+    brg = cam_dir(db, cam_lat, cam_lon)              # 카메라 방향을 따라 접근(방향게이트 통과)
     v = v0_kph / 3.6
     d = float(start_dist)                            # 카메라까지 1D 남은거리
     cruise_v = v0_kph / 3.6
@@ -58,8 +80,8 @@ def run(db, cam_lat, cam_lon, label, start_dist, v0_kph, warn, decel, engaged, e
 
     t = 0.0
     for _ in range(int(start_dist / max(v, 1.0) / DT) + 400):
-        lat, lon = offset_south(cam_lat, cam_lon, d)
-        payload = logic.update(lat, lon, 0.0, v, warn, decel, sound=1, have_fix=True)
+        lat, lon = offset_along(cam_lat, cam_lon, d, brg)
+        payload = logic.update(lat, lon, brg, v, warn, decel, sound=1, have_fix=True)
         s, dl, dd = payload["s"], payload["dl"], payload["dd"]
         if s == 1:
             fired_headsup = True
@@ -103,14 +125,14 @@ def continuity_test(db, cam_lat, cam_lon):
     """래치 검증(현실적): 직진 접근 중 GPS 방위가 2사이클 +70° 튀어도(노이즈) 통과 전까지 stage>=1 유지.
     위치는 직진(물리 일관), 헤딩만 순간 오류 → 카메라가 잠깐 전방 시야각 밖으로 나감."""
     logic = SpeedCameraLogic(db, RATE)
+    brg0 = cam_dir(db, cam_lat, cam_lon)            # 카메라 방향 따라 접근(게이트 통과)
     v = 80 / 3.6
     d = 700.0
     seen_warn = False
     gap_after_warn = False
     while d > 5:
-        lat, lon = offset_south(cam_lat, cam_lon, d)
-        brg = bearing_deg(lat, lon, cam_lat, cam_lon)   # 실제 진행방향(직진 접근)
-        heading = brg + 70.0 if 360 > d > 320 else brg  # d≈350 부근 2사이클 방위 노이즈
+        lat, lon = offset_along(cam_lat, cam_lon, d, brg0)
+        heading = brg0 + 70.0 if 360 > d > 320 else brg0  # d≈350 부근 2사이클 방위 노이즈
         s = logic.update(lat, lon, heading, v, True, False, 1, True)["s"]
         if d <= 580:
             if s >= 1:
@@ -123,8 +145,8 @@ def continuity_test(db, cam_lat, cam_lon):
 
 def crosstrack_test(db, cam_lat, cam_lon):
     """cross-track 검증: 경로상(정렬) 카메라는 매칭, 진행방향 15° 빗나간 카메라(횡이격 큼)는 배제."""
-    plat, plon = offset_south(cam_lat, cam_lon, 300.0)
-    brg = bearing_deg(plat, plon, cam_lat, cam_lon)
+    brg = cam_dir(db, cam_lat, cam_lon)            # 카메라 방향 따라 접근
+    plat, plon = offset_along(cam_lat, cam_lon, 300.0, brg)
     hit_on = db.nearest_forward(plat, plon, heading=brg, radius_m=400)        # 정렬 → 매칭 기대
     hit_off = db.nearest_forward(plat, plon, heading=brg + 15.0, radius_m=400)  # 15° 빗남 → 횡이격 ~77m
     on_ok = hit_on is not None and hit_on["dist"] < 350
@@ -201,7 +223,7 @@ def main():
         for f in fails:
             print("  - " + f)
         return 1
-    print("SIL 검정 통과 ✅  (경고 단계·감속 수렴·구간유지 정상)")
+    print("SIL 검정 통과 [OK]  (경고 단계·감속 수렴·구간유지 정상)")
     return 0
 
 
