@@ -25,8 +25,9 @@ MIN_OVERSPEED_MS = 1.0   # 이 이상 초과해야 감속(노이즈 방지)
 DECEL_OFFSET_KPH = 5     # engage 감속 목표 = 제한속도 + 5km/h
 CHIME_S = 1.2            # 단계 진입 시 소리 윈도우(s)
 HEADING_MIN_SPEED = 1.0  # 이 이하 속도는 방위 부정확 → 전방필터 해제
-PASS_MARGIN_M = 30.0     # 최근접 후 이만큼 멀어지면 통과로 간주(래치 해제)
-BEHIND_DEG = 100.0       # 진행방향 대비 이 각도 이상 뒤면 통과로 간주
+PASS_MARGIN_M = 12.0     # 최근접 후 이만큼 멀어지면 통과로 간주(래치 해제) — 빠른 해제
+BEHIND_DEG = 95.0        # 진행방향 대비 이 각도 이상 뒤면 통과로 간주(통과 직후 해제)
+PASS_MIN_M = 15.0        # 통과판정 최소 거리하한(이보다 가까우면 아직 통과 전)
 SWITCH_CLOSER_M = 50.0   # 래치 중 더 가까운 다른 카메라가 나타나면 전환하는 거리차
 
 # 감속/경고 시작 "여유 거리"(m) GUI 선택지. param SpeedCameraDecelMargin 의 인덱스 → 이 값.
@@ -57,7 +58,7 @@ class SpeedCameraLogic:
             d = haversine_m(lat, lon, t["lat"], t["lon"])
             t["min_dist"] = min(t["min_dist"], d)
             behind = heading is not None and abs((bearing_deg(lat, lon, t["lat"], t["lon"]) - heading + 180) % 360 - 180) > BEHIND_DEG
-            grew = d > t["min_dist"] + PASS_MARGIN_M and d > 40.0
+            grew = d > t["min_dist"] + PASS_MARGIN_M and d > PASS_MIN_M
             if behind or grew:
                 self.target = None
 
