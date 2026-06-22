@@ -342,13 +342,15 @@ class LongitudinalMpc:
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
 
     # Lane-change lead release: during a driver-requested lane change (gated in
-    # longitudinal_planner) ignore only the slow ORIGINAL-lane lead (leadOne) so the MPC
-    # accelerates to the target lane's flow speed (None -> "fake fast lead"). leadTwo is KEPT
-    # as a forward safety net (on Tesla it can track a vehicle already in the target lane;
-    # ccg/Gemini review). Restore happens when the planner clears the flag next frame.
+    # longitudinal_planner) ignore BOTH original-lane leads so the MPC accelerates to the
+    # target lane's flow speed (None -> "fake fast lead"). NOTE: leadTwo is also suppressed —
+    # keeping it (earlier ccg/Gemini #2) backfired: leadTwo is usually the same/close car and
+    # held the speed down (src=lead1, negative aTarget), defeating the release. The planner's
+    # proximity gate requires both leads to be far before releasing. Restore: flag cleared next frame.
     lead_one = None if lead_release else radarstate.leadOne
+    lead_two = None if lead_release else radarstate.leadTwo
     lead_xv_0 = self.process_lead(lead_one)
-    lead_xv_1 = self.process_lead(radarstate.leadTwo)
+    lead_xv_1 = self.process_lead(lead_two)
 
     # To estimate a safe distance from a moving lead, we calculate how much stopping
     # distance that lead needs as a minimum. We can add that to the current distance

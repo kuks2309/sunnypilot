@@ -160,14 +160,19 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     else:
       target_bsm_clear = False  # fail-closed: unknown direction -> no release
     lead_one = sm['radarState'].leadOne
+    lead_two = sm['radarState'].leadTwo
     # Raw condition: driver-requested lane change, target rear clear, and held back by a
     # FAR slow lead. Proximity gate (LC_RELEASE_MIN_DIST) prevents accelerating into a close
-    # lead before the lateral move clears it (ccg/Gemini #1). leadTwo stays active in the MPC.
+    # lead before the lateral move clears it (ccg/Gemini #1). Both leadOne and leadTwo are
+    # suppressed in the MPC, so leadTwo (if present) must also be far, else we'd accelerate
+    # toward a close second lead.
+    lead_two_ok = (not lead_two.status) or lead_two.dRel > LC_RELEASE_MIN_DIST
     release_cond = bool(
       meta.laneChangeState == log.LaneChangeState.laneChangeStarting
       and target_bsm_clear
       and lead_one.status and lead_one.vLead < v_cruise
       and lead_one.dRel > LC_RELEASE_MIN_DIST
+      and lead_two_ok
     )
     # Hysteresis: require sustained clear before engaging; disengage instantly on any block
     # (BSM trip / state change) to avoid accel<->brake oscillation (ccg/Gemini #4).
