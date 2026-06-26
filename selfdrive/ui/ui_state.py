@@ -60,6 +60,7 @@ class UIState(UIStateSP):
         "carControl",
         "liveParameters",
         "rawAudioData",
+        "customReservedRawData0",  # 단속카메라 데몬 payload(상대방위/거리)
       ] + self.sm_services_ext
     )
 
