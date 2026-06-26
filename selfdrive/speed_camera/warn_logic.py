@@ -78,6 +78,7 @@ class SpeedCameraLogic:
                warn_enabled: bool, decel_enabled: bool, sound: int, have_fix: bool = True) -> dict:
         stage, dist, limit, flags = 0, 0, 0, 0
         dl, dd = 0, 0
+        rb = 999   # 카메라의 내 차 기준 상대방위(도, 0=전방, +우/−좌). 999=미상
 
         if not (warn_enabled or decel_enabled):
             self.target = None
@@ -90,6 +91,8 @@ class SpeedCameraLogic:
                 t = self.target
                 d = haversine_m(lat, lon, t["lat"], t["lon"])  # 래치 대상까지 직접 거리(시야각 무관)
                 dist, limit, flags = int(d), t["limit"], t["flags"]
+                if heading is not None:  # 내 차 기준 카메라 상대방위(+우/−좌)
+                    rb = int(round((bearing_deg(lat, lon, t["lat"], t["lon"]) - heading + 180) % 360 - 180))
                 v = max(speed_ms, 0.0)
                 target_kph = limit + DECEL_OFFSET_KPH if limit > 0 else 0
 
@@ -121,4 +124,4 @@ class SpeedCameraLogic:
             self.chime_left -= 1
 
         return {"s": stage, "d": dist, "l": limit, "f": flags,
-                "snd": sound, "c": chime, "dl": dl, "dd": dd}
+                "snd": sound, "c": chime, "dl": dl, "dd": dd, "rb": rb}
