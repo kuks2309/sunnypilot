@@ -108,11 +108,12 @@ def speed_camera_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMas
   head = "Section Cam" if flags in (2, 3) else "Speed Cam"
   lim = f" {limit}" if limit else ""
 
+  # AlertSize.small 은 text1 만 화면에 표시 → 거리를 text1 에 합쳐 한 줄로 보이게
   if stage == 2:
-    return Alert(f"SLOW DOWN{lim}", f"{dist} m",
+    return Alert(f"SLOW DOWN{lim}  {dist}m", f"{dist} m",
                  AlertStatus.userPrompt, AlertSize.small,
                  Priority.MID, VisualAlert.none, audible, 0.5)
-  return Alert(f"{head}{lim}", f"{dist} m",
+  return Alert(f"{head}{lim}  {dist}m", f"{dist} m",
                AlertStatus.normal, AlertSize.small,
                Priority.LOW, VisualAlert.none, audible, 0.5)
 
