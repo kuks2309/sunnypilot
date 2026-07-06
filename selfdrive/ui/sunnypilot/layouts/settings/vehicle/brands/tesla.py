@@ -13,7 +13,9 @@ class TeslaSettings(BrandSettings):
   def __init__(self):
     super().__init__()
     self.coop_steering_toggle = toggle_item_sp(tr("Cooperative Steering"), "", param="TeslaCoopSteering")
-    self.items = [self.coop_steering_toggle]
+    self.long_fusion_toggle = toggle_item_sp(tr("Tesla ACC Longitudinal Fusion (Experimental A/B)"), "",
+                                             param="TeslaLongitudinalFusion")
+    self.items = [self.coop_steering_toggle, self.long_fusion_toggle]
 
   def update_settings(self):
     coop_steering_desc = (
@@ -21,10 +23,18 @@ class TeslaSettings(BrandSettings):
       f"{tr('The faster you go, the stiffer the steering gets.')}"
     )
 
+    long_fusion_desc = (
+      f"{tr('Experimental A/B option. When openpilot longitudinal is active, floors openpilot accel with Teslas own')}<br>" +
+      f"{tr('ACC deceleration so Teslas lead braking can override openpilots weaker vision braking. Only adds braking, never speeds up.')}"
+    )
+
     enable_offroad_msg = tr("Enable \"Always Offroad\" in Device panel, or turn vehicle off to toggle.")
     if not ui_state.is_offroad():
       coop_steering_desc = f"<b>{enable_offroad_msg}</b><br><br>{coop_steering_desc}"
+      long_fusion_desc = f"<b>{enable_offroad_msg}</b><br><br>{long_fusion_desc}"
 
     self.coop_steering_toggle.set_description(coop_steering_desc)
+    self.long_fusion_toggle.set_description(long_fusion_desc)
 
     self.coop_steering_toggle.action_item.set_enabled(ui_state.is_offroad())
+    self.long_fusion_toggle.action_item.set_enabled(ui_state.is_offroad())

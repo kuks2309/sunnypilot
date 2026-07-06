@@ -1279,6 +1279,10 @@
     "title": "Tesla Coop Steering",
     "description": ""
   },
+  "TeslaLongitudinalFusion": {
+    "title": "Tesla ACC Longitudinal Fusion (Experimental A/B)",
+    "description": ""
+  },
   "TorqueBar": {
     "title": "[TIZI/TICI only] Steering Arc",
     "description": "Display steering arc on the driving screen when lateral control is enabled."
