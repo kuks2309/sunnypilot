@@ -105,7 +105,7 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
 
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
-    self._traffic_light_indicator.render(self._content_rect)
+    # self._traffic_light_indicator.render(self._content_rect)  # 신호등 HUD 일시중지 (2026-07-10, 미완) — 재개 시 주석 해제
     self._speed_camera_arrow.render(self._content_rect)
 
     # End clipping region
