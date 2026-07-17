@@ -96,6 +96,22 @@ class SteeringLayout(Widget):
       title=lambda: tr("Neural Network Lateral Control (NNLC)"),
       description=""
     )
+    # Adjacent Lane Bias (문구는 영문 ASCII — onroad 한글 폰트 미지원)
+    self._alb_toggle = toggle_item_sp(
+      param="AdjacentLaneBiasEnabled",
+      title=lambda: tr("Adjacent Lane Bias"),
+      description=lambda: tr("Shift lane position away from a vehicle detected in the adjacent blind spot. "
+                             "Active above 60 km/h."),
+    )
+    self._alb_offset = option_item_sp(
+      param="AdjacentLaneBiasOffsetCm",
+      title=lambda: tr("Bias Offset"),
+      min_value=10,
+      max_value=40,
+      value_change_step=5,
+      description=lambda: tr("How far to shift within the lane when an adjacent vehicle is detected."),
+      label_callback=lambda cm: f"{cm / 100:.2f} m",
+    )
 
     items = [
       self._mads_toggle,
@@ -111,6 +127,9 @@ class SteeringLayout(Widget):
       self._torque_customization_button,
       LineSeparatorSP(40),
       self._nnlc_toggle,
+      LineSeparatorSP(40),
+      self._alb_toggle,
+      self._alb_offset,
     ]
     return items
 
@@ -139,6 +158,7 @@ class SteeringLayout(Widget):
     self._mads_settings_button.action_item.set_enabled(ui_state.is_offroad() and self._mads_toggle.action_item.get_state())
     self._blinker_control_options.set_visible(self._blinker_control_toggle.action_item.get_state())
     self._blinker_reengage_delay.set_visible(self._blinker_control_toggle.action_item.get_state())
+    self._alb_offset.set_visible(self._alb_toggle.action_item.get_state())
 
     enforce_torque_enabled = self._torque_control_toggle.action_item.get_state()
     nnlc_enabled = self._nnlc_toggle.action_item.get_state()
