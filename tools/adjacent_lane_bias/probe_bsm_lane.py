@@ -111,7 +111,8 @@ def analyze_lanes(rlog):
             lc_prev = lcs
 
             # 기준값 통계: 정상 직진 주행 구간만
-            if lcs != "laneChangeOff" or v_ego < SPEED_GATE_MS:
+            # (laneChangeState enum 값은 "off" — "laneChangeOff" 아님. 실측 확인 2026-07-18)
+            if lcs != "off" or v_ego < SPEED_GATE_MS:
                 continue
             if p1 < PROB_GATE or p2 < PROB_GATE:
                 continue
@@ -190,27 +191,26 @@ print(f"유효 프레임(60km/h↑, prob≥{PROB_GATE}, 차선변경 아님): {l
 if len(M) < MIN_FRAMES:
     print(f"!! 프레임 부족(<{MIN_FRAMES}) — 고속 주행 로그 필요", flush=True)
 else:
-    for name, v, exp in (("laneLines[1].y[0] 좌측", Y1, "≈ +1.8"),
-                         ("laneLines[2].y[0] 우측", Y2, "≈ -1.8"),
-                         ("measured=-(y1+y2)/2  ", M, "≈  0.0"),
-                         ("차선폭 y1-y2        ", W, "≈  3.5")):
+    # 주의: laneLines[1]/[2] 중 어느 쪽이 좌/우 마커인지, y± 방향이 어느 쪽인지는
+    # 빌드/모델에 따라 다를 수 있다(2026-07-18 실측: [1].y<0, [2].y>0). 그러나
+    # measured = -(y1+y2)/2 는 y1·y2 에 대칭이라 좌/우 라벨과 무관하게 값이 동일하다.
+    # 따라서 부호의 진짜 판정은 아래 [부호 2차 확인](차선변경 물리 테스트)이 담당한다.
+    for name, v in (("laneLines[1].y[0]", Y1), ("laneLines[2].y[0]", Y2),
+                    ("measured=-(y1+y2)/2", M), ("차선폭 |y1-y2|", W)):
         s = stats(v)
-        print(f"  {name}: mean {s[0]:+6.2f}  sd {s[1]:4.2f}  "
-              f"[{s[2]:+6.2f}, {s[3]:+6.2f}]  기대 {exp}", flush=True)
+        mean = abs(s[0]) if "차선폭" in name else s[0]
+        print(f"  {name:20s}: mean {mean:+6.2f}  sd {s[1]:4.2f}  [{s[2]:+6.2f}, {s[3]:+6.2f}]", flush=True)
 
-    ok_sign = st.mean(Y1) > 0 and st.mean(Y2) < 0
-    ok_center = abs(st.mean(M)) < 0.25
-    ok_width = 2.5 < st.mean(W) < 4.5
-    print(f"  부호 규약(y+=좌): {'✅ 확인' if ok_sign else '!! 반대 — 스펙 §4.1 부호 뒤집을 것'}", flush=True)
-    print(f"  중앙 기준값 ≈0  : {'✅ 확인' if ok_center else '!! 편중 — 오프셋 기준 재검토'}", flush=True)
-    print(f"  차선폭 타당     : {'✅ 확인' if ok_width else '!! 이상 — 차선 인덱스 확인'}", flush=True)
-    if ok_sign:
-        print("  → measured > 0 = 차가 중앙보다 왼쪽. 스펙 §2.1 target 부호 그대로 사용 가능", flush=True)
+    ok_center = abs(st.mean(M)) < 0.25          # centered ≈ 0
+    ok_width = 2.5 < abs(st.mean(W)) < 4.5      # 자기 차로 마커 맞으면 |폭|≈3.5
+    print(f"  중앙 기준값 ≈0 (measured 공식 유효): {'✅' if ok_center else '!! 편중'}", flush=True)
+    print(f"  차선폭 타당 (인덱스=자기차로 마커): {'✅' if ok_width else '!! 인덱스 이상'}", flush=True)
 
 if LC:
     print(f"\n  [부호 2차 확인] 차선변경 {len(LC)}건의 measured 변화:", flush=True)
     for d, m0, m1 in LC[:10]:
         print(f"    {d:<5} measured {m0:+.2f} → {m1:+.2f} (Δ{m1 - m0:+.2f})", flush=True)
-    print("    (left 변경 시 Δ가 양수여야 measured>0=왼쪽 규약과 일치)", flush=True)
+    print("    → left 변경(차가 왼쪽 이동) 시 Δ 양수 = measured>0 은 '중앙보다 왼쪽' 규약.", flush=True)
+    print("      이 경우 SIGN=+1 (스펙 §4.1). Δ가 음수로 나오면 SIGN=-1 로 뒤집을 것.", flush=True)
 
 print("\n=== 프로브 완료 ===", flush=True)
