@@ -7,6 +7,8 @@ Adjacent Lane Bias — 인접 차량 감지 시 반대쪽으로 차로 내 편�
 from dataclasses import dataclass
 
 SPEED_GATE_MS = 60 / 3.6  # 스펙 §2.2 속도 게이트
+MAX_ABS_OFFSET = 0.5      # 스펙 §5 하드 상한
+SIGN = 1.0                # §7.1 B 실측 확정(2026-07-18). +1 = measured>0 이 '중앙보다 왼쪽'
 
 
 @dataclass
@@ -71,3 +73,30 @@ class AdjacentLaneBias:
         alpha = f.dt / (self.tau + f.dt)
         self._filtered += alpha * (raw - self._filtered)
         return self._filtered
+
+    @staticmethod
+    def measured_offset(f: Frame) -> float:
+        """차로 중앙 대비 현재 횡방향 위치(m). SIGN=+1 이면 양수 = 중앙보다 왼쪽.
+
+        measured = -(y1+y2)/2 는 y1·y2 에 대칭이라 laneLines[1]/[2] 의 좌/우
+        라벨·y± 방향과 무관하게 값이 동일하다(§7.1 B 실측: centered≈+0.06m).
+        """
+        return SIGN * (-(f.lane_y_left + f.lane_y_right) / 2.0)
+
+    def update(self, f: Frame) -> float:
+        """Δκ(곡률 보정, 1/m). controlsd 가 desired_curvature 에 더한다."""
+        target = self.target_offset(f)
+        measured = self.measured_offset(f)
+
+        # 편향 해제 시엔 Δκ=0 → 중앙 복원은 모델에 맡긴다 (스펙 §2.1).
+        # 여기서 error=-measured 로 두면 우리가 중앙 복원을 떠맡아 모델과 길항한다.
+        if target == 0.0:
+            return 0.0
+
+        # 하드 상한: 이미 크게 벗어났으면 추가 편향 금지 (스펙 §5)
+        if abs(measured) > MAX_ABS_OFFSET:
+            return 0.0
+
+        error = target - measured
+        delta = self.kp * error
+        return max(-self.max_curv, min(self.max_curv, delta))
