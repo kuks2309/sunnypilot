@@ -21,7 +21,6 @@ from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
 from openpilot.sunnypilot.selfdrive.controls.controlsd_ext import ControlsExt
-from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane_bias import AdjacentLaneBias, Frame as ALBFrame
 
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
@@ -52,13 +51,6 @@ class Controls(ControlsExt):
     self.curvature = 0.0
     self.desired_curvature = 0.0
 
-    # Adjacent Lane Bias (인접차량 편향)
-    # ⚠️ 이 버전 Params.get()은 encoding 인자 없음. 등록 타입(INT)대로 int 반환.
-    #    선례: blinker_pause_lateral.py 의 get(key, return_default=True)
-    self.alb_enabled = self.params.get_bool("AdjacentLaneBiasEnabled")
-    offset_cm = self.params.get("AdjacentLaneBiasOffsetCm", return_default=True)
-    self.alb = AdjacentLaneBias(offset_m=offset_cm / 100.0)
-
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
 
@@ -81,32 +73,6 @@ class Controls(ControlsExt):
     if self.sm.updated["livePose"]:
       device_pose = Pose.from_live_pose(self.sm['livePose'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_pose)
-
-  def _adjacent_lane_bias_curvature(self, CS, model_v2, lat_active) -> float:
-    """인접차량 편향 Δκ. 데이터 부족·비활성 시 0."""
-    if not self.alb_enabled:
-      return 0.0
-    if len(model_v2.laneLines) < 3 or len(model_v2.laneLineProbs) < 3:
-      return 0.0
-    if not len(model_v2.laneLines[1].y) or not len(model_v2.laneLines[2].y):
-      return 0.0
-
-    # ⚠️ laneChangeState enum 값은 "off" (NOT "laneChangeOff"). 실측 확인 2026-07-18.
-    #    "laneChangeOff"로 비교하면 lane_change_active가 항상 True → ALB 영구 OFF(silent failure).
-    lc_state = str(model_v2.meta.laneChangeState).split(".")[-1]
-    f = ALBFrame(
-      left_blindspot=bool(CS.leftBlindspot),
-      right_blindspot=bool(CS.rightBlindspot),
-      v_ego=float(CS.vEgo),
-      lane_y_left=float(model_v2.laneLines[1].y[0]),
-      lane_y_right=float(model_v2.laneLines[2].y[0]),
-      prob_left=float(model_v2.laneLineProbs[1]),
-      prob_right=float(model_v2.laneLineProbs[2]),
-      lane_change_active=(lc_state != "off"),
-      lat_active=bool(lat_active),
-      dt=DT_CTRL,
-    )
-    return self.alb.update(f)
 
   def state_control(self):
     CS = self.sm['carState']
@@ -174,10 +140,6 @@ class Controls(ControlsExt):
       new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
-
-    # Adjacent Lane Bias: clip_curvature 앞에서 주입 → 속도별 곡률·jerk 상한이 그대로 적용됨
-    new_desired_curvature += self._adjacent_lane_bias_curvature(CS, model_v2, CC.latActive)
-
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 
