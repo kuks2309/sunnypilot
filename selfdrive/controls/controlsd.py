@@ -53,9 +53,10 @@ class Controls(ControlsExt):
     self.desired_curvature = 0.0
 
     # Adjacent Lane Bias (인접차량 편향)
+    # ⚠️ 이 버전 Params.get()은 encoding 인자 없음. 등록 타입(INT)대로 int 반환.
+    #    선례: blinker_pause_lateral.py 의 get(key, return_default=True)
     self.alb_enabled = self.params.get_bool("AdjacentLaneBiasEnabled")
-    raw_cm = self.params.get("AdjacentLaneBiasOffsetCm", encoding="utf8")
-    offset_cm = int(raw_cm) if raw_cm else 30
+    offset_cm = self.params.get("AdjacentLaneBiasOffsetCm", return_default=True)
     self.alb = AdjacentLaneBias(offset_m=offset_cm / 100.0)
 
     self.pose_calibrator = PoseCalibrator()
