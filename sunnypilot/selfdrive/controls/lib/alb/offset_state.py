@@ -36,11 +36,12 @@ class OffsetState:
         self._filt=0.0; self._arm=0
 
     def _target(self, inp: OffsetInput) -> float:
+        # 래치 항상 감쇠 (게이트 중에도): 스테일 감지 방지
+        left = self._ll.update(inp.left_bsm, inp.dt)
+        right = self._rl.update(inp.right_bsm, inp.dt)
         if not inp.lat_active or inp.lane_change_active: self._arm=0; return 0.0
         if inp.v_ego < self.speed_gate_ms: self._arm=0; return 0.0
         if inp.prob_left < 0.5 or inp.prob_right < 0.5: self._arm=0; return 0.0
-        left = self._ll.update(inp.left_bsm, inp.dt)
-        right = self._rl.update(inp.right_bsm, inp.dt)
         if left == right:  # 양쪽/무감지
             self._arm=0; return 0.0
         # 지속감지 arming (리뷰 #7)

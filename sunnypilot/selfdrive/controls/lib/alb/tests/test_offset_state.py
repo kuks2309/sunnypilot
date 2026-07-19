@@ -55,3 +55,13 @@ def test_latch_holds_flicker():
 
 def test_lane_change_gate():
     assert settle(OffsetState(offset_m=0.2), mk(right=True, lc=True)) == pytest.approx(0.0, abs=0.02)
+
+def test_latch_decays_during_gate():
+    # right detected (latch on), then a long gated interval (lane change) with BSM off
+    # must NOT resurrect stale bias once the gate lifts
+    s = OffsetState(offset_m=0.2, latch_s=1.2)
+    settle(s, mk(right=True))                      # latch primed
+    for _ in range(int(2.0/DT)):                   # 2s gated, BSM now off
+        s.update(mk(right=False, lc=True))
+    out = settle(s, mk(right=False), secs=3.0)     # gate lifts, BSM still off; filter settles
+    assert out == pytest.approx(0.0, abs=0.02)
