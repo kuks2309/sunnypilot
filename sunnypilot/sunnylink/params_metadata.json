@@ -1279,6 +1279,10 @@
     "title": "Tesla Coop Steering",
     "description": ""
   },
+  "TeslaCurveAssistDelegation": {
+    "title": "Tesla Curve Assist Delegation (Experimental A/B)",
+    "description": ""
+  },
   "TeslaLongitudinalFusion": {
     "title": "Tesla ACC Longitudinal Fusion (Experimental A/B)",
     "description": ""
