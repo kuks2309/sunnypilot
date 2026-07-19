@@ -18,8 +18,14 @@ def test_full_offset_blend_near_one():
     b,_ = settle(BlendState(offset_m=0.2), 0.2)
     assert b > 0.9
 
-def test_partial_offset_partial_blend():
-    b,_ = settle(BlendState(offset_m=0.2), 0.1)
+def test_small_offset_saturates_blend():
+    # activation_m=0.05(기본값) 초과 오프셋이면 blend는 1로 포화되어야 함
+    b,_ = settle(BlendState(offset_m=0.2), 0.06)
+    assert b > 0.9
+
+def test_tiny_offset_partial():
+    # activation_m 미만의 작은 오프셋(램프 구간)에서는 부분 blend 유지
+    b,_ = settle(BlendState(offset_m=0.2, activation_m=0.05), 0.02)
     assert 0.2 < b < 0.9
 
 def test_blend_is_filtered_not_step():
