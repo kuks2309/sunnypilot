@@ -30,7 +30,11 @@ _A_TOTAL_MAX_BP = [20., 40.]
 
 # Lane-change lead release (see update()): never release a close lead, and require the
 # release condition to hold briefly before engaging (anti-oscillation). ccg/Gemini review.
-LC_RELEASE_MIN_DIST = 25.0   # m, do not release leadOne if closer than this
+LC_RELEASE_MIN_DIST = 25.0   # m, absolute floor -- do not release any lead closer than this
+LC_RELEASE_GAP_T = 2.2       # s, speed-scaled gate: release needs dRel > v_ego * this (25m fixed was a
+                             # 60 km/h assumption; at 110 km/h it let the car accelerate to 32m behind a
+                             # slower target-lane lead -- 2026-07-30 incident, manual brake at 111 km/h)
+LC_RELEASE_MIN_TTC = 10.0    # s, never release while closing on a lead with less time-to-collision
 LC_RELEASE_HOLD = 0.3        # s, sustained-clear required before release (instant disengage)
 
 def get_max_accel(v_ego):
@@ -162,16 +166,26 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     lead_one = sm['radarState'].leadOne
     lead_two = sm['radarState'].leadTwo
     # Raw condition: driver-requested lane change, target rear clear, and held back by a
-    # FAR slow lead. Proximity gate (LC_RELEASE_MIN_DIST) prevents accelerating into a close
-    # lead before the lateral move clears it (ccg/Gemini #1). Both leadOne and leadTwo are
-    # suppressed in the MPC, so leadTwo (if present) must also be far, else we'd accelerate
-    # toward a close second lead.
-    lead_two_ok = (not lead_two.status) or lead_two.dRel > LC_RELEASE_MIN_DIST
+    # FAR slow lead. Both leadOne and leadTwo are suppressed in the MPC, so leadTwo (if
+    # present) must also be far, else we'd accelerate toward a close second lead.
+    # The gate is speed-scaled (time-gap) with a TTC guard: during the maneuver the vision
+    # lead becomes the TARGET lane's car, and a fixed 25m floor let the car keep accelerating
+    # to within a 1s gap at highway speed (2026-07-30 incident). Cancel is instantaneous
+    # (hysteresis is arm-side only), so a closing lead now revokes the release mid-maneuver.
+    v_ego = sm['carState'].vEgo
+    dist_gate = max(LC_RELEASE_MIN_DIST, v_ego * LC_RELEASE_GAP_T)
+
+    def lead_far_enough(lead):
+      closing = -lead.vRel
+      ttc_ok = closing < 0.5 or (lead.dRel / closing) > LC_RELEASE_MIN_TTC
+      return lead.dRel > dist_gate and ttc_ok
+
+    lead_two_ok = (not lead_two.status) or lead_far_enough(lead_two)
     release_cond = bool(
       meta.laneChangeState == log.LaneChangeState.laneChangeStarting
       and target_bsm_clear
       and lead_one.status and lead_one.vLead < v_cruise
-      and lead_one.dRel > LC_RELEASE_MIN_DIST
+      and lead_far_enough(lead_one)
       and lead_two_ok
     )
     # Hysteresis: require sustained clear before engaging; disengage instantly on any block
