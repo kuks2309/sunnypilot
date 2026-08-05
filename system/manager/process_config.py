@@ -64,6 +64,10 @@ def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started
 
+def tmap_nav(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # 오프로드에서도 돈다 — 주차 중에 수신만 확인하는 것이 제어 개입 없는 안전한 검증 경로다.
+  return params.get_bool("TmapNavEnabled")
+
 def use_github_runner(started, params, CP: car.CarParams) -> bool:
   return not PC and params.get_bool("EnableGithubRunner") and (
     not params.get_bool("NetworkMetered") and not params.get_bool("GithubRunnerSufficientVoltage"))
@@ -129,6 +133,7 @@ procs = [
   PythonProcess("soundd", "selfdrive.ui.soundd", driverview),
   PythonProcess("locationd", "selfdrive.locationd.locationd", only_onroad),
   PythonProcess("speed_camera_warnd", "selfdrive.speed_camera.speed_camera_warnd", only_onroad),
+  PythonProcess("tmap_navd", "selfdrive.tmap_nav.tmap_navd", tmap_nav),
   NativeProcess("_pandad", "selfdrive/pandad", ["./pandad"], always_run, enabled=False),
   PythonProcess("calibrationd", "selfdrive.locationd.calibrationd", only_onroad),
   PythonProcess("torqued", "selfdrive.locationd.torqued", only_onroad),

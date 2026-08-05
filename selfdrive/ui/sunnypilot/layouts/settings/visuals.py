@@ -107,6 +107,13 @@ class VisualsLayout(Widget):
            "it can only lower speed, never raise it. Requires the warning above and the camera database."),
         None,
       ),
+      "TmapNavEnabled": (
+        lambda: tr("TMAP Navigation Data (Korea)"),
+        tr("Receive live navigation data (road speed limit, enforcement points, turn-by-turn) from the TMAP " +
+           "phone bridge over UDP. Receive and log only for now — it does not affect control. " +
+           "Stale or unverifiable data is discarded rather than used."),
+        None,
+      ),
     }
     self._toggles = {}
     for param, (title, desc, callback) in self._toggle_defs.items():
