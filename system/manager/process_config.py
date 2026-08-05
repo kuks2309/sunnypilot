@@ -66,7 +66,13 @@ def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 
 def tmap_nav(started: bool, params: Params, CP: car.CarParams) -> bool:
   # 오프로드에서도 돈다 — 주차 중에 수신만 확인하는 것이 제어 개입 없는 안전한 검증 경로다.
-  return params.get_bool("TmapNavEnabled")
+  try:
+    return params.get_bool("TmapNavEnabled")
+  except Exception:
+    # 파라미터 키는 params_keys.h(C++)에 있어 재빌드 전에는 기기가 모른다.
+    # 그 상태에서 예외가 나면 매니저가 openpilot 을 못 띄운다 — 실주행 기기에서는 용납 불가.
+    # 모르는 키면 그냥 끈 것으로 본다.
+    return False
 
 def use_github_runner(started, params, CP: car.CarParams) -> bool:
   return not PC and params.get_bool("EnableGithubRunner") and (
