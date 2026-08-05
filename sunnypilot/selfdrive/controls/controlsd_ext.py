@@ -17,6 +17,7 @@ from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.selfdrive.controls.lib.blinker_pause_lateral import BlinkerPauseLateral
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_v0 import LatControlTorque as LatControlTorqueV0
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import get_T_FOLLOW
 
 
 class ControlsExt(ModelStateBase):
@@ -92,6 +93,9 @@ class ControlsExt(ModelStateBase):
 
     CC_SP.leadOne = self.get_lead_data(sm['radarState'].leadOne)
     CC_SP.leadTwo = self.get_lead_data(sm['radarState'].leadTwo)
+    # Following time gap for the current personality -- lets car controllers scale
+    # lead-relevance decisions (e.g. Tesla delegation gate) with the user's gap setting.
+    CC_SP.tFollow = float(get_T_FOLLOW(sm['selfdriveState'].personality))
 
     # MADS state
     CC_SP.mads = sm['selfdriveStateSP'].mads
