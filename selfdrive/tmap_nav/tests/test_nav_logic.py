@@ -157,5 +157,124 @@ class TestNavLogic(unittest.TestCase):
     self.assertEqual(haversine(37.0, 127.0, 37.0, 127.0), 0.0)
 
 
+# ---------------------------------------------------------------------------
+# 구간단속 — 값은 2026-08-06 경부고속도로 실측(11,393m / 110km/h)에서 가져왔다.
+# 근거: docs remote_instruction/SECTION_ENFORCEMENT_ANALYSIS.md
+# ---------------------------------------------------------------------------
+
+def sec_pkt(**over):
+  """구간단속 관련 필드를 갖춘 guiding 패킷."""
+  return variant(nSdiSpeedLimit=0, **over)
+
+
+class TestSectionTracker(unittest.TestCase):
+
+  def setUp(self):
+    self.lg = TmapNavLogic()
+
+  def feed(self, t, lat=0.0, lon=0.0, fix=False, **over):
+    self.lg.on_packet(pkt(sec_pkt(**over)), t)
+    return self.lg.update(t, lat, lon, fix)
+
+  def test_start_approach_latches_length_and_limit(self):
+    """시점 접근에서 nSdiBlockDist 는 구간 전체 길이다(실측 11393 고정)."""
+    out = self.feed(10.0, nSdiType=2, sdiTypeName="SDI_SPEED_BLOCK_START_POS",
+                    nSdiDist=857, nSdiBlockType=1, nSdiBlockSpeed=110,
+                    nSdiBlockDist=11393, nSdiBlockAverageSpeed=0)
+    self.assertEqual(out["bs"], 1)        # 시점 접근
+    self.assertEqual(out["bl"], 110)      # 구간 제한속도 래치
+    self.assertAlmostEqual(out["bn"], 11393.0)
+
+  def test_entry_detected_when_start_signal_disappears_up_close(self):
+    """실측 패턴: 857m 부터 보이다가 157m 를 마지막으로 신호가 사라진다 = 진입."""
+    self.feed(10.0, nSdiType=2, nSdiDist=857, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=11393)
+    self.feed(11.0, nSdiType=2, nSdiDist=157, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=11393)
+    out = self.feed(12.0, nSdiType=None, nSdiBlockType=0, nSdiBlockDist=0)
+    self.assertEqual(out["bs"], 2)        # 구간 내부
+    self.assertEqual(out["bl"], 110)      # 래치된 제한속도가 남아 있다
+    self.assertAlmostEqual(out["bn"], 11393.0)
+
+  def test_distant_start_then_gone_is_discarded(self):
+    """멀리서 스쳤을 뿐이면 진입으로 보지 않는다."""
+    self.feed(10.0, nSdiType=2, nSdiDist=3000, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=11393)
+    out = self.feed(11.0, nSdiType=None, nSdiBlockType=0)
+    self.assertEqual(out["bs"], 0)
+
+  def test_inside_accumulates_distance_without_any_sdi(self):
+    """구간 내부 10분간 SDI 가 안 온다. 그동안 자체 이동거리로 버텨야 한다."""
+    self.feed(10.0, nSdiType=2, nSdiDist=157, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=11393)
+    lat, lon = 37.25084, 127.10393       # 실제 시점 좌표
+    out = self.feed(11.0, lat, lon, True, nSdiType=None, nSdiBlockType=0)
+    self.assertEqual(out["bs"], 2)
+    # 정북으로 약 900m 이동
+    out = self.feed(41.0, lat + 900.0 / 111320.0, lon, True,
+                    nSdiType=None, nSdiBlockType=0)
+    self.assertAlmostEqual(out["bt"], 900.0, delta=10.0)
+    self.assertAlmostEqual(out["br"], 11393.0 - 900.0, delta=10.0)
+    self.assertGreater(out["bo"], 0)      # 자체 평균속도가 산출된다
+
+  def test_gps_jump_is_not_accumulated(self):
+    """경로 재생 되감기 같은 순간이동을 거리로 세면 안 된다."""
+    self.feed(10.0, nSdiType=2, nSdiDist=157, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=11393)
+    self.feed(11.0, 37.25, 127.10, True, nSdiType=None, nSdiBlockType=0)
+    out = self.feed(12.0, 37.35, 127.10, True, nSdiType=None, nSdiBlockType=0)
+    self.assertAlmostEqual(out["bt"], 0.0, delta=1.0)   # 11km 점프는 무시
+
+  def test_end_approach_distance_is_remaining_not_length(self):
+    """종점 접근에서 nSdiBlockDist 는 종점까지 남은 거리다(실측 989 → 40)."""
+    out = self.feed(10.0, nSdiType=3, sdiTypeName="SDI_SPEED_BLOCK_END_POS",
+                    nSdiDist=989, nSdiBlockType=3, nSdiBlockSpeed=110,
+                    nSdiBlockDist=989, nSdiBlockAverageSpeed=62)
+    self.assertEqual(out["bs"], 3)
+    self.assertAlmostEqual(out["br"], 989.0)
+    self.assertEqual(out["ba"], 62)
+
+  def test_zero_average_speed_is_rejected(self):
+    """실측에서 62 -> 0 -> 62 로 튄다. 0 을 정지로 오독하면 안 된다."""
+    out = self.feed(10.0, nSdiType=3, nSdiDist=665, nSdiBlockType=3,
+                    nSdiBlockSpeed=110, nSdiBlockDist=665, nSdiBlockAverageSpeed=0)
+    self.assertEqual(out["ba"], -1)
+
+  def test_block_type_1_is_recognised(self):
+    """carrot 은 nSdiBlockType in [2,3] 으로 거른다. 실측 시점 접근은 1 이라 놓친다."""
+    out = self.feed(10.0, nSdiType=2, nSdiDist=857, nSdiBlockType=1,
+                    nSdiBlockSpeed=110, nSdiBlockDist=11393)
+    self.assertNotEqual(out["bs"], 0)
+
+  def test_mid_type_when_bridge_starts_sending_it(self):
+    """브리지가 nSdiType=4 를 보내주면 자체 추적보다 그 값을 우선한다."""
+    out = self.feed(10.0, nSdiType=4, sdiTypeName="SDI_SPEED_BLOCK_MID_POS",
+                    nSdiDist=0, nSdiBlockType=2, nSdiBlockSpeed=110,
+                    nSdiBlockDist=9532)
+    self.assertEqual(out["bs"], 2)
+    self.assertAlmostEqual(out["br"], 9532.0)
+
+  def test_overrun_releases_state(self):
+    """구간 길이를 크게 넘겨 달리면 이탈로 보고 버린다. 붙들고 있으면 위험하다."""
+    self.feed(10.0, nSdiType=2, nSdiDist=157, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=500)
+    lat, lon = 37.25, 127.10
+    self.feed(11.0, lat, lon, True, nSdiType=None, nSdiBlockType=0)
+    t = 12.0
+    for i in range(1, 8):                 # 4초에 100m = 90km/h 로 전진
+      t += 4.0
+      out = self.feed(t, lat + i * 100.0 / 111320.0, lon, True,
+                      nSdiType=None, nSdiBlockType=0)
+    self.assertEqual(out["bs"], 0)        # 700m > 500m x 1.2 → 이탈
+
+  def test_link_loss_clears_section(self):
+    self.feed(10.0, nSdiType=2, nSdiDist=157, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=11393)
+    self.feed(11.0, 37.25, 127.10, True, nSdiType=None, nSdiBlockType=0)
+    out = self.lg.update(11.0 + LINK_TIMEOUT + 1.0, 0, 0, False)
+    self.assertEqual(out["bs"], 0)
+    self.assertEqual(out["lk"], 0)
+
+
 if __name__ == "__main__":
   unittest.main()

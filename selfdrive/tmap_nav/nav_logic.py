@@ -25,6 +25,35 @@ SDI_SOURCE_OK = "RGData.sdiInfo"   # 엔진이 준 값. "none"/"heap" 은 쓰지
 
 EARTH_R = 6371000.0
 
+# --- 구간단속 -----------------------------------------------------------------
+# 근거: docs remote_instruction/SECTION_ENFORCEMENT_ANALYSIS.md (경부 11.4km/110km/h 실측)
+#
+# nSdiType 과 nSdiBlockType 이 짝으로 온다. carrot 은 `nSdiBlockType in [2,3]` 으로
+# 판정하는데, 실측 시작 접근은 **1** 이었다. 그대로 쓰면 진입을 통째로 놓친다.
+SDI_BLOCK_START = 2       # SDI_SPEED_BLOCK_START_POS  구간 시점
+SDI_BLOCK_END = 3         # SDI_SPEED_BLOCK_END_POS    구간 종점
+SDI_BLOCK_MID = 4         # SDI_SPEED_BLOCK_MID_POS    구간 내 (현재 브리지가 미전송)
+
+BLOCK_START = 1           # 시점 접근 — nSdiBlockDist = 구간 전체 길이
+BLOCK_MID = 2             # 구간 내   — (현재 미전송)
+BLOCK_END = 3             # 종점 접근 — nSdiBlockDist = 종점까지 남은 거리
+
+# 시점을 이 거리 안까지 좁힌 뒤 신호가 끊기면 진입한 것으로 본다.
+# 실측에서 857m 부터 보이다가 157m 를 마지막으로 사라졌다.
+SECTION_ARM_DIST = 400.0
+SECTION_OVERRUN = 1.2     # 구간 길이의 이 배를 넘게 달리면 이탈로 보고 상태를 버린다
+SECTION_MAX_SEC = 3600.0  # 안전 타임아웃. 이 시간을 넘기면 무조건 해제
+# 연속 fix 사이의 함의속도가 이보다 크면 순간이동으로 보고 누적하지 않는다.
+# 고정 거리로 자르면 갱신 간격을 무시하게 된다 — 30초에 900m 는 정상 주행(108km/h)인데
+# 거리만 보면 점프로 오판한다. 216km/h 를 넘는 이동은 물리적으로 주행이 아니다.
+JUMP_MAX_MPS = 60.0
+
+# 구간 상태
+SEC_NONE = 0
+SEC_APPROACH = 1          # 시점 접근 중
+SEC_INSIDE = 2            # 구간 내부 (자체 추적)
+SEC_EXIT = 3              # 종점 접근 중
+
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
   """두 좌표 사이 거리(m)."""
@@ -35,6 +64,131 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
   return 2 * EARTH_R * math.asin(math.sqrt(a))
 
 
+class SectionTracker:
+  """구간단속 상태를 스스로 붙든다.
+
+  왜 필요한가: 브리지가 구간 내부에서 SDI 를 보내지 않는다. 실측(경부 11.4km)에서
+  시점 통과 직후부터 종점 1km 전까지 **10분 동안 신호가 없었다.** 티맵 평균속도
+  (`nSdiBlockAverageSpeed`)도 종점 1km 전에야 나오는데, 그때 이미 초과돼 있으면
+  남은 1km 로는 되돌릴 수 없다.
+
+  그래서 시점에서 받은 구간 길이·제한속도를 래치하고 자차 이동거리로 내부를 버틴다.
+  브리지가 구간 내 전송(`nSdiType=4`)을 보완하면 이 추적은 교차검증용으로 남는다 —
+  링크가 끊겨도 이미 진입한 구간은 끝까지 관리해야 하므로 어느 쪽이든 값어치가 있다.
+  """
+
+  def __init__(self):
+    self.state = SEC_NONE
+    self.length = 0.0        # 구간 전체 길이(m) — 시점에서 래치
+    self.limit = 0           # 구간 제한속도(km/h)
+    self.traveled = 0.0      # 진입 후 자체 누적 이동거리(m)
+    self.remain = 0.0        # 종점까지 남은 거리(m)
+    self.tmap_avg = -1       # 티맵이 준 구간 평균속도(km/h). -1 = 없음/무효
+    self.t_enter = 0.0
+    self._arm_dist = 1e9     # 접근 중 시점까지 남은 거리
+    self._last_fix = None
+    self._last_fix_t = 0.0
+
+  def step_distance(self, now: float, lat: float, lon: float, have_fix: bool) -> float:
+    """연속 fix 사이 이동거리를 잰다. fix 가 끊기면 누적을 중단한다."""
+    if not have_fix or (lat == 0.0 and lon == 0.0):
+      self._last_fix = None
+      return 0.0
+    moved = 0.0
+    if self._last_fix is not None:
+      moved = haversine(self._last_fix[0], self._last_fix[1], lat, lon)
+      dt = now - self._last_fix_t
+      # 함의속도로 판정한다. 거리만 보면 갱신 간격이 긴 정상 주행을 점프로 오판한다.
+      if dt <= 0.0 or moved / dt > JUMP_MAX_MPS:
+        moved = 0.0
+    self._last_fix = (lat, lon)
+    self._last_fix_t = now
+    return moved
+
+  def update(self, now: float, moved: float, sdi_type: int, blk_type: int,
+             blk_speed: int, blk_dist: float, blk_avg_raw: int, sdi_dist: float) -> None:
+    if self.state == SEC_INSIDE:
+      self.traveled += moved
+      self.remain = max(0.0, self.length - self.traveled)
+
+    # 티맵 평균속도는 0 이 섞여 온다(실측 62 → 0 → 62). 정지로 오독하면 안 된다.
+    self.tmap_avg = blk_avg_raw if blk_avg_raw > 0 else -1
+
+    approaching_start = (blk_type == BLOCK_START or sdi_type == SDI_BLOCK_START)
+    in_middle = (blk_type == BLOCK_MID or sdi_type == SDI_BLOCK_MID)
+    approaching_end = (blk_type == BLOCK_END or sdi_type == SDI_BLOCK_END)
+
+    if approaching_start:
+      # nSdiBlockDist 는 여기서 **구간 전체 길이**다(실측 11393 고정).
+      if blk_dist > 0:
+        self.length = blk_dist
+      if blk_speed > 0:
+        self.limit = blk_speed
+      self._arm_dist = sdi_dist if sdi_dist > 0 else self._arm_dist
+      self.state = SEC_APPROACH
+      return
+
+    if in_middle:
+      # 브리지가 구간 내 전송을 보완하면 여기로 들어온다. 자체 추적보다 우선한다.
+      if self.state != SEC_INSIDE:
+        self._enter(now)
+      if blk_dist > 0:
+        self.remain = blk_dist
+        self.traveled = max(0.0, self.length - blk_dist)
+      if blk_speed > 0:
+        self.limit = blk_speed
+      return
+
+    if approaching_end:
+      # nSdiBlockDist 는 여기서 **종점까지 남은 거리**다(실측 989 → 40).
+      if self.state == SEC_NONE:
+        self._enter(now)     # 시점을 놓쳤어도 종점 신호로 구간을 인지한다
+      self.state = SEC_EXIT
+      self.remain = blk_dist if blk_dist > 0 else sdi_dist
+      if blk_speed > 0:
+        self.limit = blk_speed
+      return
+
+    # --- 구간 신호가 없는 구간 ---
+    if self.state == SEC_APPROACH:
+      # 시점을 충분히 좁힌 뒤 신호가 끊겼다 = 통과해 진입한 것이다.
+      # 실측: 857m 부터 보이다가 157m 를 마지막으로 사라졌다.
+      if self._arm_dist <= SECTION_ARM_DIST:
+        self._enter(now)
+      else:
+        self.reset()         # 멀리서 스쳤을 뿐이면 버린다
+    elif self.state == SEC_EXIT:
+      self.reset()           # 종점 신호가 사라졌다 = 구간을 벗어났다
+    elif self.state == SEC_INSIDE:
+      over = self.length > 0 and self.traveled > self.length * SECTION_OVERRUN
+      if over or (now - self.t_enter) > SECTION_MAX_SEC:
+        self.reset()         # 이탈했거나 너무 오래됐다. 붙들고 있으면 위험하다
+
+  def own_avg_kph(self, now: float) -> int:
+    """자체 추적 평균속도(km/h). 판단 불가면 -1."""
+    if self.state not in (SEC_INSIDE, SEC_EXIT):
+      return -1
+    dt = now - self.t_enter
+    if dt <= 1.0 or self.traveled <= 0.0:
+      return -1
+    return int(round(self.traveled / dt * 3.6))
+
+  def _enter(self, now: float) -> None:
+    self.state = SEC_INSIDE
+    self.traveled = 0.0
+    self.remain = self.length
+    self.t_enter = now
+
+  def reset(self) -> None:
+    self.state = SEC_NONE
+    self.length = 0.0
+    self.limit = 0
+    self.traveled = 0.0
+    self.remain = 0.0
+    self.tmap_avg = -1
+    self._arm_dist = 1e9
+
+
 class TmapNavLogic:
   """수신 패킷을 누적해 매 주기 payload 를 만든다. 소켓·cereal 을 모르는 순수 로직."""
 
@@ -43,6 +197,7 @@ class TmapNavLogic:
     self.apilot: dict = {}     # 마지막으로 받은 apilot 딕셔너리
     self.rx_count = 0
     self.parse_errors = 0
+    self.section = SectionTracker()
 
   def on_packet(self, data: bytes, now_mono: float) -> bool:
     """데이터그램 하나를 흡수한다. 파싱 성공 시 True."""
@@ -103,6 +258,28 @@ class TmapNavLogic:
           sdi_dist = haversine(lat, lon, sdi_lat, sdi_lon)
           sdi_recalc = True
 
+    # --- 구간단속 ---
+    # 자차 이동거리는 SDI 유효성과 무관하게 항상 누적한다. 구간 내부에서는 SDI 가
+    # 아예 안 오므로, 그때도 거리를 세고 있어야 한다.
+    moved = self.section.step_distance(now_mono, lat, lon, have_fix and link)
+    if sdi_usable:
+      self.section.update(
+        now_mono, moved,
+        sdi_type,
+        _as_int(a.get("nSdiBlockType")),
+        _as_int(a.get("nSdiBlockSpeed")),
+        float(_as_int(a.get("nSdiBlockDist"))),
+        _as_int(a.get("nSdiBlockAverageSpeed")),
+        sdi_dist,
+      )
+    elif not link:
+      self.section.reset()   # 링크가 끊기면 붙들고 있던 구간 상태도 버린다
+    else:
+      # 안내는 살아 있는데 SDI 만 없는 구간 — 내부 추적을 계속 돌린다
+      self.section.update(now_mono, moved, -1, 0, 0, 0.0, 0, 0.0)
+
+    sec = self.section
+
     return {
       "lk": int(link),                    # 링크 살아있음
       "gd": int(guiding),                 # 안내 중
@@ -118,6 +295,15 @@ class TmapNavLogic:
       "ra": road_age,                     # 도로 채널 나이(ms), -1=없음
       "src": sdi_src or "",               # SDI 출처 원문(진단용)
       "n": self.rx_count,                 # 누적 수신 패킷 수
+
+      # --- 구간단속 ---
+      "bs": sec.state,                    # 0=없음 1=시점접근 2=구간내 3=종점접근
+      "bl": sec.limit,                    # 구간 제한속도(km/h), 0=없음
+      "bn": round(sec.length, 1),         # 구간 전체 길이(m)
+      "br": round(sec.remain, 1),         # 종점까지 남은 거리(m)
+      "bt": round(sec.traveled, 1),       # 진입 후 자체 누적 이동거리(m)
+      "ba": sec.tmap_avg,                 # 티맵 구간 평균속도(km/h), -1=없음/무효
+      "bo": sec.own_avg_kph(now_mono),    # 자체 추적 평균속도(km/h), -1=판단불가
     }
 
 

@@ -78,7 +78,9 @@ def main():
       # 토글이 꺼져 있으면 수신은 계속하되 소비자에게는 아무것도 주지 않는다.
       payload = {"lk": payload["lk"], "gd": 0, "sl": 0, "rn": "", "st": -1,
                  "sd": 0.0, "sx": 0, "sy": 0.0, "sz": 0.0, "rc": 0,
-                 "sa": -1, "ra": -1, "src": "", "n": payload["n"]}
+                 "sa": -1, "ra": -1, "src": "", "n": payload["n"],
+                 "bs": 0, "bl": 0, "bn": 0.0, "br": 0.0, "bt": 0.0,
+                 "ba": -1, "bo": -1}
 
     # customReservedRawData1 은 Data(raw bytes) 필드 → new_message 의 init(service) 가 안 먹힘.
     # service=None 으로 빈 Event 생성 후 Data 필드에 직접 대입. (speed_camera_warnd 와 동일)
