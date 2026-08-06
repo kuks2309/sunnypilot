@@ -51,6 +51,7 @@ class VCruiseHelperSP:
     self.custom_acc_enabled = self.params.get_bool("CustomAccIncrementsEnabled")
     self.short_increment = self.params.get("CustomAccShortPressIncrement", return_default=True)
     self.long_increment = self.params.get("CustomAccLongPressIncrement", return_default=True)
+    self.tesla_speed_sync = self.params.get_bool("TeslaSpeedSync")
 
     self.enable_button_timers = CRUISE_BUTTON_TIMER
 
@@ -68,6 +69,22 @@ class VCruiseHelperSP:
     self.custom_acc_enabled = self.params.get_bool("CustomAccIncrementsEnabled")
     self.short_increment = self.params.get("CustomAccShortPressIncrement", return_default=True)
     self.long_increment = self.params.get("CustomAccLongPressIncrement", return_default=True)
+    self.tesla_speed_sync = self.params.get_bool("TeslaSpeedSync")
+
+  def apply_tesla_speed_sync(self, CS_SP) -> None:
+    """TeslaSpeedSync: openpilot's cruise target follows Tesla's own dynamic set speed.
+
+    Unifies the two speed-setting schemes (op button counter vs Tesla's road-aware target).
+    Field data 2026-08-06: handover setpoint gaps averaged +32 kph, yanking speed at every
+    delegation edge; with this on, speed adjustments become Tesla-native (stalk/screen).
+    Toggle off, cruise not initialized, or Tesla value invalid (0) -> untouched."""
+    if not self.tesla_speed_sync or self.v_cruise_kph == V_CRUISE_UNSET:
+      return
+    tset = float(CS_SP.teslaAccSetSpeed)
+    if tset < 1.0:
+      return
+    self.v_cruise_kph = float(np.clip(tset, V_CRUISE_MIN, V_CRUISE_MAX))
+    self.v_cruise_cluster_kph = self.v_cruise_kph
 
   def update_v_cruise_delta(self, long_press: bool, v_cruise_delta: float) -> tuple[bool, float]:
     if not self.custom_acc_enabled:

@@ -1283,6 +1283,10 @@
     "title": "Tesla Curve Assist Delegation (Experimental A/B)",
     "description": ""
   },
+  "TeslaSpeedSync": {
+    "title": "Tesla Speed Sync (Experimental A/B)",
+    "description": ""
+  },
   "TeslaLongitudinalFusion": {
     "title": "Tesla ACC Longitudinal Fusion (Experimental A/B)",
     "description": ""
