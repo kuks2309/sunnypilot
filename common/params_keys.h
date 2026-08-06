@@ -158,6 +158,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SpeedCameraWarnSound", {PERSISTENT | BACKUP, INT, "1"}},
     {"SpeedCameraDecelEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"SpeedCameraDecelMargin", {PERSISTENT | BACKUP, INT, "1"}},
+    {"TmapNavEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},
     {"EnableGithubRunner", {PERSISTENT | BACKUP, BOOL}},
     {"GreenLightAlert", {PERSISTENT | BACKUP, BOOL, "0"}},

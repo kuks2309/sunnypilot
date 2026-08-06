@@ -64,6 +64,16 @@ def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started
 
+def tmap_nav(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # 오프로드에서도 돈다 — 주차 중에 수신만 확인하는 것이 제어 개입 없는 안전한 검증 경로다.
+  try:
+    return params.get_bool("TmapNavEnabled")
+  except Exception:
+    # 파라미터 키는 params_keys.h(C++)에 있어 재빌드 전에는 기기가 모른다.
+    # 그 상태에서 예외가 나면 매니저가 openpilot 을 못 띄운다 — 실주행 기기에서는 용납 불가.
+    # 모르는 키면 그냥 끈 것으로 본다.
+    return False
+
 def use_github_runner(started, params, CP: car.CarParams) -> bool:
   return not PC and params.get_bool("EnableGithubRunner") and (
     not params.get_bool("NetworkMetered") and not params.get_bool("GithubRunnerSufficientVoltage"))
@@ -128,7 +138,11 @@ procs = [
   PythonProcess("ui", "selfdrive.ui.ui", always_run, restart_if_crash=True),
   PythonProcess("soundd", "selfdrive.ui.soundd", driverview),
   PythonProcess("locationd", "selfdrive.locationd.locationd", only_onroad),
-  PythonProcess("speed_camera_warnd", "selfdrive.speed_camera.speed_camera_warnd", only_onroad),
+  # [단속카메라 비활성화 2026-08-06] 데몬 미등록 → customReservedRawData0 발행 중단 = 기능 정지.
+  # 이 토픽은 services.py 에서 주기 0(on-demand)이라 미발행이어도 SubMaster alive/valid 검사에 걸리지 않는다(commIssue 없음).
+  # 되살리려면 아래 한 줄의 주석만 해제.
+  # PythonProcess("speed_camera_warnd", "selfdrive.speed_camera.speed_camera_warnd", only_onroad),
+  PythonProcess("tmap_navd", "selfdrive.tmap_nav.tmap_navd", tmap_nav),
   NativeProcess("_pandad", "selfdrive/pandad", ["./pandad"], always_run, enabled=False),
   PythonProcess("calibrationd", "selfdrive.locationd.calibrationd", only_onroad),
   PythonProcess("torqued", "selfdrive.locationd.torqued", only_onroad),

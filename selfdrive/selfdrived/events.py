@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import json
+# [단속카메라 비활성화 2026-08-06] json 은 단속카메라 payload 파싱 전용이었다. 되살릴 때 함께 주석 해제.
+# import json
 import math
 import os
 
@@ -80,53 +81,56 @@ def below_engage_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.
   return NoEntryAlert(f"Drive above {get_display_speed(CP.minEnableSpeed, metric)} to engage")
 
 
+# [단속카메라 비활성화 2026-08-06] 아래 SPEED_CAM_SOUND / speed_camera_alert 전체 주석.
+# 되살리려면 이 블록 + 상단 json import + EVENTS 의 speedCameraWarning 매핑을 함께 복구할 것.
+#
 # 단속카메라 거리경고 — speed_camera_warnd 가 customReservedRawData0 로 보낸 상태를 읽어
 # engage 여부와 무관(ET.PERMANENT)하게 화면+소리 경고를 만든다. snd/chime 으로 소리 선택·단발 제어.
-SPEED_CAM_SOUND = {
-  0: AudibleAlert.none,
-  1: AudibleAlert.warningSoft,
-  2: AudibleAlert.warningImmediate,
-  3: AudibleAlert.prompt,
-}
-
-def speed_camera_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
-  data: dict = {}
-  try:
-    raw = sm['customReservedRawData0']
-    if raw:
-      data = json.loads(bytes(raw))
-  except (ValueError, KeyError, TypeError):
-    pass
-
-  stage = data.get("s", 0)
-  dist = data.get("d", 0)
-  limit = data.get("l", 0)
-  flags = data.get("f", 0)
-  audible = SPEED_CAM_SOUND.get(data.get("snd", 1), AudibleAlert.warningSoft) if data.get("c", 0) else AudibleAlert.none
-
-  # 영문 고정(기본 Inter 폰트로 깨짐 없이 렌더 — 한글은 UNIFONT 필요)
-  head = "Section Cam" if flags in (2, 3) else "Speed Cam"
-  lim = f" {limit}" if limit else ""
-
-  # 내 차 기준 카메라 상대방위(+우/−좌, 0=전방). 999=미상
-  rb = data.get("rb", 999)
-  if rb == 999:
-    rel = ""
-  elif -15 <= rb <= 15:
-    rel = "  ahead"
-  elif rb > 15:
-    rel = f"  R{rb}"
-  else:
-    rel = f"  L{-rb}"
-
-  # AlertSize.small 은 text1 만 화면에 표시 → 거리·방향을 text1 에 합쳐 한 줄로
-  if stage == 2:
-    return Alert(f"SLOW DOWN{lim}  {dist}m{rel}", f"{dist} m",
-                 AlertStatus.userPrompt, AlertSize.small,
-                 Priority.MID, VisualAlert.none, audible, 0.5)
-  return Alert(f"{head}{lim}  {dist}m{rel}", f"{dist} m",
-               AlertStatus.normal, AlertSize.small,
-               Priority.LOW, VisualAlert.none, audible, 0.5)
+# SPEED_CAM_SOUND = {
+#   0: AudibleAlert.none,
+#   1: AudibleAlert.warningSoft,
+#   2: AudibleAlert.warningImmediate,
+#   3: AudibleAlert.prompt,
+# }
+#
+# def speed_camera_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+#   data: dict = {}
+#   try:
+#     raw = sm['customReservedRawData0']
+#     if raw:
+#       data = json.loads(bytes(raw))
+#   except (ValueError, KeyError, TypeError):
+#     pass
+#
+#   stage = data.get("s", 0)
+#   dist = data.get("d", 0)
+#   limit = data.get("l", 0)
+#   flags = data.get("f", 0)
+#   audible = SPEED_CAM_SOUND.get(data.get("snd", 1), AudibleAlert.warningSoft) if data.get("c", 0) else AudibleAlert.none
+#
+#   # 영문 고정(기본 Inter 폰트로 깨짐 없이 렌더 — 한글은 UNIFONT 필요)
+#   head = "Section Cam" if flags in (2, 3) else "Speed Cam"
+#   lim = f" {limit}" if limit else ""
+#
+#   # 내 차 기준 카메라 상대방위(+우/−좌, 0=전방). 999=미상
+#   rb = data.get("rb", 999)
+#   if rb == 999:
+#     rel = ""
+#   elif -15 <= rb <= 15:
+#     rel = "  ahead"
+#   elif rb > 15:
+#     rel = f"  R{rb}"
+#   else:
+#     rel = f"  L{-rb}"
+#
+#   # AlertSize.small 은 text1 만 화면에 표시 → 거리·방향을 text1 에 합쳐 한 줄로
+#   if stage == 2:
+#     return Alert(f"SLOW DOWN{lim}  {dist}m{rel}", f"{dist} m",
+#                  AlertStatus.userPrompt, AlertSize.small,
+#                  Priority.MID, VisualAlert.none, audible, 0.5)
+#   return Alert(f"{head}{lim}  {dist}m{rel}", f"{dist} m",
+#                AlertStatus.normal, AlertSize.small,
+#                Priority.LOW, VisualAlert.none, audible, 0.5)
 
 
 def below_steer_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
@@ -274,9 +278,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   # ********** events only containing alerts displayed in all states **********
 
-  EventName.speedCameraWarning: {
-    ET.PERMANENT: speed_camera_alert,
-  },
+  # [단속카메라 비활성화 2026-08-06] 알림 매핑 제거. 단, 키 자체는 남겨야 한다 —
+  # tests/test_alerts.py::test_events_defined 가 log.capnp 의 모든 EventName 이 EVENTS 에 있는지 검사한다.
+  # 빈 dict 는 어떤 ET 에도 매칭되지 않으므로 화면·소리 모두 나오지 않는다(actuatorsApiUnavailable 과 동일 패턴).
+  # 되살리려면 아래 두 줄을 원복: ET.PERMANENT: speed_camera_alert,
+  EventName.speedCameraWarning: {},
 
   EventName.joystickDebug: {
     ET.WARNING: joystick_alert,
