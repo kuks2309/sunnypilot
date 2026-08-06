@@ -26,6 +26,7 @@ V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
 
 
+
 def update_manual_button_timers(CS: car.CarState, button_timers: dict[car.CarState.ButtonEvent.Type, int]) -> None:
   # increment timer for buttons still pressed
   for k in button_timers:
@@ -51,6 +52,8 @@ class VCruiseHelperSP:
     self.custom_acc_enabled = self.params.get_bool("CustomAccIncrementsEnabled")
     self.short_increment = self.params.get("CustomAccShortPressIncrement", return_default=True)
     self.long_increment = self.params.get("CustomAccLongPressIncrement", return_default=True)
+    self.tesla_speed_sync = self.params.get_bool("TeslaSpeedSync")
+    self._driver_v_cruise_kph = None
 
     self.enable_button_timers = CRUISE_BUTTON_TIMER
 
@@ -68,6 +71,37 @@ class VCruiseHelperSP:
     self.custom_acc_enabled = self.params.get_bool("CustomAccIncrementsEnabled")
     self.short_increment = self.params.get("CustomAccShortPressIncrement", return_default=True)
     self.long_increment = self.params.get("CustomAccLongPressIncrement", return_default=True)
+    self.tesla_speed_sync = self.params.get_bool("TeslaSpeedSync")
+
+  def tesla_sync_restore(self) -> None:
+    """TeslaSpeedSync frame prologue: put the DRIVER-managed cruise value back before the
+    base button logic runs, so stalk adjustments keep evolving the driver's own set speed
+    instead of the Tesla-synced override from last frame."""
+    if self.tesla_speed_sync and self._driver_v_cruise_kph is not None:
+      self.v_cruise_kph = self._driver_v_cruise_kph
+
+  def apply_tesla_speed_sync(self, CS_SP, overtake_active: bool) -> None:
+    """TeslaSpeedSync: openpilot's cruise target follows Tesla's own dynamic set speed.
+
+    Unifies the two speed-setting schemes (op button counter vs Tesla's road-aware target);
+    handover setpoint gaps averaged +32 kph on 8/6 logs, yanking speed at every delegation
+    edge. The DRIVER-managed value (buttons/stalk, existing VCruiseHelper logic) is preserved
+    in parallel, and the PLANNER STATE picks which one applies:
+      cruising        -> Tesla's dynamic target (the sync)
+      overtake window -> the driver's own set speed, exactly as the V3 lane-change overtake
+                         was designed (accelerate toward v_cruise) -- no boost constants.
+    The window ends when the model judges the maneuver settled (state back to off) -- the
+    user's steering-returned-to-baseline criterion, curvature-immune (2026-08-07).
+    Toggle off, cruise not initialized, or invalid Tesla value -> untouched."""
+    if not self.tesla_speed_sync or self.v_cruise_kph == V_CRUISE_UNSET:
+      self._driver_v_cruise_kph = None
+      return
+    self._driver_v_cruise_kph = self.v_cruise_kph  # post-button driver value, kept evolving
+    tset = float(CS_SP.teslaAccSetSpeed)
+    if overtake_active or tset < 1.0:
+      return  # planner sees the driver's set speed (overtake path / invalid Tesla value)
+    self.v_cruise_kph = float(np.clip(tset, V_CRUISE_MIN, V_CRUISE_MAX))
+    self.v_cruise_cluster_kph = self.v_cruise_kph
 
   def update_v_cruise_delta(self, long_press: bool, v_cruise_delta: float) -> tuple[bool, float]:
     if not self.custom_acc_enabled:

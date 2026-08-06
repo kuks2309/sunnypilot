@@ -87,6 +87,7 @@ class LongitudinalPlannerSP:
     longitudinalPlanSP.longitudinalPlanSource = self.source
     longitudinalPlanSP.vTarget = float(self.output_v_target)
     longitudinalPlanSP.aTarget = float(self.output_a_target)
+    longitudinalPlanSP.overtakeActive = bool(getattr(self, 'lane_change_overtake', False))
     longitudinalPlanSP.events = self.events_sp.to_msg()
 
     # Dynamic Experimental Control

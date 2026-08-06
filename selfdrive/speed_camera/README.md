@@ -1,5 +1,23 @@
 # 단속카메라 거리경고 (Korea speed camera warning)
 
+> ## ⛔ 현재 비활성화 (2026-08-06, 사용자 요청)
+> 아래 문서는 **기능이 켜져 있을 때**의 동작 설명이다. 지금은 경고·HUD·자동감속이 모두 꺼져 있다.
+> 모듈(`camera_db.py` / `warn_logic.py` / `speed_camera_warnd.py` / `speed_cameras.bin`)과 SIL 하니스는 그대로 남아 있고,
+> **연결부만** `# [단속카메라 비활성화 2026-08-06]` 주석으로 끊어 두었다. 되살리려면 그 마커를 grep 해 6곳을 원복한다:
+>
+> | 파일 | 원복할 것 |
+> |---|---|
+> | `system/manager/process_config.py` | `speed_camera_warnd` 프로세스 등록 |
+> | `selfdrive/selfdrived/selfdrived.py` | `import json` + `EventName.speedCameraWarning` 발생 블록 |
+> | `selfdrive/selfdrived/events.py` | `import json` + `SPEED_CAM_SOUND`/`speed_camera_alert` + `EVENTS` 매핑(`{}` → `ET.PERMANENT: speed_camera_alert`) |
+> | `selfdrive/ui/onroad/augmented_road_view.py` | `SpeedCameraArrow` import·생성·render |
+> | `sunnypilot/.../speed_limit_resolver.py` | `import json` + `_camera_decel_enabled`(2곳) + `_get_camera_limit` + `_resolve_limit_sources` 호출부 |
+> | `selfdrive/ui/sunnypilot/layouts/settings/visuals.py` | 토글 2개 + 선택기 2개 + `_update_state` 참조 2줄 |
+>
+> `EVENTS` 항목의 키를 지우지 말 것 — `tests/test_alerts.py::test_events_defined` 가 `log.capnp` 의 모든 `EventName` 이
+> `EVENTS` 에 존재하는지 검사한다. 값만 `{}` 로 비워 두는 것이 정답이다.
+> 파라미터 키(`SpeedCameraWarnEnabled` 등)는 `params_keys.h` 에 그대로 두었다(값을 읽는 코드가 없어 무해).
+
 전국 무인교통단속카메라(고정식 과속·구간단속)에 접근하면 **engage(개입) 여부와 무관하게**
 화면 알림 + 소리 경고를 낸다. 데이터는 공공데이터포털 전국무인교통단속카메라표준데이터.
 

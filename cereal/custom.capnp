@@ -194,6 +194,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   aTarget @5 :Float32;
   events @6 :List(OnroadEventSP.Event);
   e2eAlerts @7 :E2eAlerts;
+  overtakeActive @8 :Bool;  # lane-change maneuver in progress (model: starting..finishing, ends when settled)
 
   struct DynamicExperimentalControl {
     state @0 :DynamicExperimentalControlState;
@@ -371,6 +372,7 @@ struct CarControlSP @0xa5cd762cd951a455 {
   leadOne @2 :LeadData;
   leadTwo @3 :LeadData;
   intelligentCruiseButtonManagement @4 :IntelligentCruiseButtonManagement;
+  tFollow @5 :Float32;  # planner following time gap (s) for the current personality
 
   struct Param {
     key @0 :Text;
@@ -435,6 +437,7 @@ struct BackupManagerSP @0xf98d843bfd7004a3 {
 
 struct CarStateSP @0xb86e6369214c01c8 {
   speedLimit @0 :Float32;
+  teslaAccSetSpeed @1 :Float32;  # Tesla APS dynamic target speed (kph); 0 = invalid/unavailable
 }
 
 struct LiveMapDataSP @0xf416ec09499d9d19 {

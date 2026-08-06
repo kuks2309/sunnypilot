@@ -11,7 +11,9 @@ from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.selfdrive.ui.onroad.traffic_light_indicator import TrafficLightIndicator
-from openpilot.selfdrive.ui.onroad.speed_camera_arrow import SpeedCameraArrow
+# [단속카메라 비활성화 2026-08-06] HUD 화살표 위젯 미사용. 되살릴 때 import·생성·render 3곳 함께 주석 해제.
+# from openpilot.selfdrive.ui.onroad.speed_camera_arrow import SpeedCameraArrow
+from openpilot.selfdrive.ui.onroad.deleg_indicator import DelegIndicator
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, DeviceCameraConfig, view_frame_from_device_frame
 from openpilot.common.transformations.orientation import rot_from_euler
@@ -60,7 +62,8 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
     self._traffic_light_indicator = TrafficLightIndicator()
-    self._speed_camera_arrow = SpeedCameraArrow()
+    # self._speed_camera_arrow = SpeedCameraArrow()  # [단속카메라 비활성화 2026-08-06]
+    self._deleg_indicator = DelegIndicator()
 
     # debug
     self._pm = messaging.PubMaster(['uiDebug'])
@@ -105,8 +108,9 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
 
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
-    self._traffic_light_indicator.render(self._content_rect)
-    self._speed_camera_arrow.render(self._content_rect)
+    # self._traffic_light_indicator.render(self._content_rect)  # 신호등 HUD 일시중지 (2026-07-10, 미완) — 재개 시 주석 해제
+    # self._speed_camera_arrow.render(self._content_rect)  # [단속카메라 비활성화 2026-08-06] — 재개 시 주석 해제
+    self._deleg_indicator.render(self._content_rect)
 
     # End clipping region
     rl.end_scissor_mode()

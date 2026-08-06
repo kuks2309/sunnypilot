@@ -158,6 +158,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SpeedCameraWarnSound", {PERSISTENT | BACKUP, INT, "1"}},
     {"SpeedCameraDecelEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"SpeedCameraDecelMargin", {PERSISTENT | BACKUP, INT, "1"}},
+    {"TmapNavEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},
     {"EnableGithubRunner", {PERSISTENT | BACKUP, BOOL}},
     {"GreenLightAlert", {PERSISTENT | BACKUP, BOOL, "0"}},
@@ -225,6 +226,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SubaruStopAndGo", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"SubaruStopAndGoManualParkingBrake", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"TeslaCoopSteering", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"TeslaCurveAssistDelegation", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"TeslaLongitudinalFusion", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"TeslaSpeedSync", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"ToyotaEnforceStockLongitudinal", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"ToyotaStopAndGoHack", {PERSISTENT | BACKUP, BOOL, "0"}},
 

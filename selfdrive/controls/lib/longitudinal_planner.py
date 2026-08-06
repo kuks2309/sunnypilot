@@ -30,7 +30,11 @@ _A_TOTAL_MAX_BP = [20., 40.]
 
 # Lane-change lead release (see update()): never release a close lead, and require the
 # release condition to hold briefly before engaging (anti-oscillation). ccg/Gemini review.
-LC_RELEASE_MIN_DIST = 25.0   # m, do not release leadOne if closer than this
+LC_RELEASE_MIN_DIST = 25.0   # m, absolute floor -- do not release any lead closer than this
+LC_RELEASE_GAP_T = 2.2       # s, speed-scaled gate for leadTwo only (not the tracked overtake lead)
+LC_RELEASE_MIN_TTC = 10.0    # s, never release while closing on a lead with less time-to-collision
+LC_RELEASE_SWAP_JUMP = 20.0  # m, dRel step that means leadOne identity swapped to the target-lane car
+LC_RELEASE_DUP_EPS = 5.0     # m, leadTwo within this of leadOne = duplicate of the same car
 LC_RELEASE_HOLD = 0.3        # s, sustained-clear required before release (instant disengage)
 
 def get_max_accel(v_ego):
@@ -63,6 +67,9 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.allow_throttle = True
     self.lane_change_lead_release = False
     self.lane_change_clear_time = 0.0
+    self.lc_in_starting = False
+    self.lc_lead_tracked = False
+    self.lc_prev_drel = 0.0
 
     self.a_desired = init_a
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
@@ -161,23 +168,54 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       target_bsm_clear = False  # fail-closed: unknown direction -> no release
     lead_one = sm['radarState'].leadOne
     lead_two = sm['radarState'].leadTwo
-    # Raw condition: driver-requested lane change, target rear clear, and held back by a
-    # FAR slow lead. Proximity gate (LC_RELEASE_MIN_DIST) prevents accelerating into a close
-    # lead before the lateral move clears it (ccg/Gemini #1). Both leadOne and leadTwo are
-    # suppressed in the MPC, so leadTwo (if present) must also be far, else we'd accelerate
-    # toward a close second lead.
-    lead_two_ok = (not lead_two.status) or lead_two.dRel > LC_RELEASE_MIN_DIST
+    # Only the lead we were ALREADY following before the maneuver began (the old-lane slow
+    # car -- the reason for the overtake) may be released. A lead that first appears DURING
+    # laneChangeStarting is the TARGET lane's car and is never released (2026-07-30 incident:
+    # it surfaced at 83m mid-maneuver and a distance-only gate kept accelerating to 32m at
+    # 110 km/h). A dRel step > LC_RELEASE_SWAP_JUMP means leadOne identity swapped to the
+    # target-lane car -> revoke instantly (cancel side has no hysteresis). A blanket
+    # speed-scaled gate was tried first and killed the overtake feature entirely (2026-08-02
+    # field report), so the tracked overtake lead keeps the original 25m floor + TTC guard.
+    v_ego = sm['carState'].vEgo
+    starting = meta.laneChangeState == log.LaneChangeState.laneChangeStarting
+    if starting and not self.lc_in_starting:
+      self.lc_lead_tracked = bool(lead_one.status)   # eligible only if followed before the maneuver
+      self.lc_prev_drel = lead_one.dRel
+    elif starting and self.lc_lead_tracked:
+      if not lead_one.status or abs(lead_one.dRel - self.lc_prev_drel) > LC_RELEASE_SWAP_JUMP:
+        self.lc_lead_tracked = False
+      else:
+        self.lc_prev_drel = lead_one.dRel
+    if not starting:
+      self.lc_lead_tracked = False
+    self.lc_in_starting = starting
+
+    def ttc_ok(lead):
+      closing = -lead.vRel
+      return closing < 0.5 or (lead.dRel / closing) > LC_RELEASE_MIN_TTC
+
+    # leadTwo: usually a duplicate track of the same car (then leadOne's checks cover it);
+    # a distinct second lead must be far (speed-scaled) and not closing.
+    lead_two_ok = ((not lead_two.status)
+                   or abs(lead_two.dRel - lead_one.dRel) < LC_RELEASE_DUP_EPS
+                   or (lead_two.dRel > max(LC_RELEASE_MIN_DIST, v_ego * LC_RELEASE_GAP_T) and ttc_ok(lead_two)))
     release_cond = bool(
-      meta.laneChangeState == log.LaneChangeState.laneChangeStarting
+      starting
       and target_bsm_clear
+      and self.lc_lead_tracked
       and lead_one.status and lead_one.vLead < v_cruise
       and lead_one.dRel > LC_RELEASE_MIN_DIST
+      and ttc_ok(lead_one)
       and lead_two_ok
     )
     # Hysteresis: require sustained clear before engaging; disengage instantly on any block
     # (BSM trip / state change) to avoid accel<->brake oscillation (ccg/Gemini #4).
     self.lane_change_clear_time = self.lane_change_clear_time + self.dt if release_cond else 0.0
     self.lane_change_lead_release = self.lane_change_clear_time >= LC_RELEASE_HOLD
+    # Overtake window for speed-target selection (TeslaSpeedSync): the maneuver is "done"
+    # when the model judges the car settled in the new lane (state back to off) -- the
+    # steering-returned-to-baseline moment, but immune to road-curvature shifts.
+    self.lane_change_overtake = starting or meta.laneChangeState == log.LaneChangeState.laneChangeFinishing
 
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
