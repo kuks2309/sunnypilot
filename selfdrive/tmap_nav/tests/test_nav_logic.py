@@ -267,6 +267,52 @@ class TestSectionTracker(unittest.TestCase):
                       nSdiType=None, nSdiBlockType=0)
     self.assertEqual(out["bs"], 0)        # 700m > 500m x 1.2 → 이탈
 
+  def test_countdown_zero_glitch_does_not_fire_risk(self):
+    """nSdiBlockTime 도 뭉치 0 글리치를 갖는다(351 -> 0 -> 351). 오탐하면 안 된다."""
+    self.feed(10.0, nSdiType=2, nSdiDist=157, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=11393, nSdiBlockTime=372)
+    self.feed(11.0, nSdiType=4, nSdiBlockType=2, nSdiBlockDist=11000, nSdiBlockTime=351)
+    out = self.feed(12.0, nSdiType=4, nSdiBlockType=2, nSdiBlockDist=10900, nSdiBlockTime=0)
+    self.assertEqual(out["bk"], 351)      # 글리치 0 은 직전 유효값으로 버틴다
+    self.assertEqual(out["bv"], 0)
+
+  def test_countdown_genuine_zero_is_accepted(self):
+    """작은 값을 거쳐 온 0 은 진짜 소진이다."""
+    self.feed(10.0, nSdiType=2, nSdiDist=157, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=11393, nSdiBlockTime=372)
+    self.feed(11.0, nSdiType=4, nSdiBlockType=2, nSdiBlockDist=500, nSdiBlockTime=3)
+    out = self.feed(12.0, nSdiType=4, nSdiBlockType=2, nSdiBlockDist=400, nSdiBlockTime=0)
+    self.assertEqual(out["bk"], 0)
+
+  def test_risk_direction_is_not_inverted(self):
+    """★ 카운트다운은 '제한속도로 갔을 때 걸리는 최소 시간'이다.
+
+    구간 안에서 0 에 도달하는 것은 최소 시간을 채운 것이므로 **준수**다.
+    이것을 위반으로 읽으면 정반대가 된다 — 한 번 틀렸던 지점이라 못 박아 둔다.
+    """
+    self.feed(10.0, nSdiType=2, nSdiDist=157, nSdiBlockType=1,
+              nSdiBlockSpeed=110, nSdiBlockDist=11393, nSdiBlockTime=372)
+    self.feed(11.0, nSdiType=4, nSdiBlockType=2, nSdiBlockDist=300, nSdiBlockTime=2)
+    out = self.feed(12.0, nSdiType=4, nSdiBlockType=2, nSdiBlockDist=200, nSdiBlockTime=0)
+    self.assertEqual(out["bk"], 0)
+    self.assertEqual(out["bv"], 0)        # 소진 = 준수. 위반이 아니다
+
+  def test_section_survives_stale_point_sdi_age(self):
+    """★ ageMs.sdi 가 아무리 커도 구간 정보를 버리면 안 된다.
+
+    실측에서 nSdiBlockDist 가 살아 움직이는 동안 ageMs.sdi 는 518초까지 증가만 했다.
+    옛 게이트를 태우면 구간 패킷 1,633건 중 1,314건을 잃었다.
+    """
+    old_age = {"road": 1200, "sdi": 518878, "sdiPlus": 1200, "tbt": 1200}
+    self.lg.on_packet(pkt(sec_pkt(nSdiType=2, nSdiDist=157, nSdiBlockType=1,
+                                  nSdiBlockSpeed=110, nSdiBlockDist=11393,
+                                  ageMs=old_age)), 10.0)
+    out = self.lg.update(10.0, 0, 0, False)
+    self.assertEqual(out["st"], -1)       # 점 SDI 는 낡아서 걸린다 (정상)
+    self.assertEqual(out["bs"], 1)        # 구간은 살아남아야 한다
+    self.assertEqual(out["bl"], 110)
+    self.assertEqual(out["bf"], 1)        # 필드가 방금 바뀌었으니 신선하다
+
   def test_link_loss_clears_section(self):
     self.feed(10.0, nSdiType=2, nSdiDist=157, nSdiBlockType=1,
               nSdiBlockSpeed=110, nSdiBlockDist=11393)

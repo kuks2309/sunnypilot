@@ -54,6 +54,25 @@ SEC_APPROACH = 1          # 시점 접근 중
 SEC_INSIDE = 2            # 구간 내부 (자체 추적)
 SEC_EXIT = 3              # 종점 접근 중
 
+# ★ 구간 채널은 `ageMs.sdi` 로 판정하면 안 된다 (2026-08-06 실측).
+# 원격이 구간단속을 전방 점(point) SDI 와 별개 채널로 분리한 뒤로, `ageMs.sdi` 는
+# 점 SDI 나이만 재고 구간 갱신에는 반응하지 않는다. 실제로 `nSdiBlockDist` 가
+# 11,313 → 1,047 로 살아 움직이는 동안 `ageMs.sdi` 는 리셋 없이 518,878ms(8분 39초)
+# 까지 선형 증가만 했다. 그 게이트를 태우면 완벽히 신선한 구간 정보를 전량 버린다.
+# 그래서 구간 신선도는 **우리가 직접** 본다 — 필드가 실제로 변하는지로.
+SECTION_STALE_SEC = 30.0
+
+# 평균속도 0 은 산발 글리치가 아니라 3~6패킷(1~2초) 뭉치로 온다(1374건 중 36건, 9덩어리).
+# 유효값 사이에 낀 단일 0 은 0건이라 "한 패킷 무시" 로는 못 거른다.
+AVG_ZERO_HOLD_SEC = 3.0
+
+# 진입 직후 ~30초는 표본 부족으로 요동한다(실측 46 → 71, 25km/h 점프). 그동안은 믿지 않는다.
+AVG_WARMUP_SEC = 30.0
+
+# 카운트다운이 이 값 이하로 내려온 뒤의 0 만 진짜 소진으로 본다.
+# 351 에서 갑자기 0 이 오는 글리치가 있어, 그대로 받으면 위반 플래그가 오탐한다.
+CD_ZERO_TRUST_SEC = 5
+
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
   """두 좌표 사이 거리(m)."""
@@ -84,10 +103,19 @@ class SectionTracker:
     self.traveled = 0.0      # 진입 후 자체 누적 이동거리(m)
     self.remain = 0.0        # 종점까지 남은 거리(m)
     self.tmap_avg = -1       # 티맵이 준 구간 평균속도(km/h). -1 = 없음/무효
+    self.countdown = -1      # nSdiBlockTime — 위반 판정 카운트다운(초). -1 = 없음
+    self.risk = 0            # 1 = 현재 페이스면 카운트다운 소진 전 종점 도달 = 평균 초과
+    self.fresh = 0           # 구간 필드가 실제로 갱신되고 있는가
     self.t_enter = 0.0
     self._arm_dist = 1e9     # 접근 중 시점까지 남은 거리
     self._last_fix = None
     self._last_fix_t = 0.0
+    self._avg_valid = -1     # 마지막 유효 평균속도
+    self._avg_zero_t = 0.0   # 0 이 연속되기 시작한 시각
+    self._cd_valid = -1      # 마지막 유효 카운트다운
+    self._cd_zero_t = 0.0
+    self._sig = None         # 구간 필드 스냅샷(변화 감지용)
+    self._sig_t = 0.0
 
   def step_distance(self, now: float, lat: float, lon: float, have_fix: bool) -> float:
     """연속 fix 사이 이동거리를 잰다. fix 가 끊기면 누적을 중단한다."""
@@ -106,16 +134,24 @@ class SectionTracker:
     return moved
 
   def update(self, now: float, moved: float, sdi_type: int, blk_type: int,
-             blk_speed: int, blk_dist: float, blk_avg_raw: int, sdi_dist: float) -> None:
+             blk_speed: int, blk_dist: float, blk_avg_raw: int,
+             blk_time: int, blk_section: bool, sdi_dist: float) -> None:
     if self.state == SEC_INSIDE:
       self.traveled += moved
       self.remain = max(0.0, self.length - self.traveled)
 
-    # 티맵 평균속도는 0 이 섞여 온다(실측 62 → 0 → 62). 정지로 오독하면 안 된다.
-    self.tmap_avg = blk_avg_raw if blk_avg_raw > 0 else -1
+    self._update_freshness(now, blk_type, blk_dist, blk_section)
+    self._update_avg(now, blk_avg_raw)
+
+    # nSdiBlockTime 은 위반 판정 카운트다운이다(실측: 초기값 372 = 11393m ÷ 110km/h,
+    # 이후 1초에 1씩 실시간 감소, 0 도달 후 0 유지). 0 이 되기 전에 종점을 통과하면
+    # 평균속도 위반이다. 평균속도를 안 쓰고도 판정이 되고, 단조 감소라 다루기 쉽다.
+    self._update_countdown(now, blk_time)
+    self._update_risk(now)
 
     approaching_start = (blk_type == BLOCK_START or sdi_type == SDI_BLOCK_START)
-    in_middle = (blk_type == BLOCK_MID or sdi_type == SDI_BLOCK_MID)
+    in_middle = (blk_type == BLOCK_MID or sdi_type == SDI_BLOCK_MID or
+                 (blk_section and blk_type == 0 and sdi_type < 0))
     approaching_end = (blk_type == BLOCK_END or sdi_type == SDI_BLOCK_END)
 
     if approaching_start:
@@ -164,12 +200,97 @@ class SectionTracker:
       if over or (now - self.t_enter) > SECTION_MAX_SEC:
         self.reset()         # 이탈했거나 너무 오래됐다. 붙들고 있으면 위험하다
 
+  def _update_freshness(self, now: float, blk_type: int, blk_dist: float,
+                        blk_section: bool) -> None:
+    """구간 필드가 실제로 갱신되는지 **우리가 직접** 본다.
+
+    `ageMs.sdi` 는 점 SDI 나이만 재므로 구간 판정에 쓸 수 없다(상수 주석 참조).
+    대신 필드 스냅샷이 바뀌는지를 보고, 안 바뀐 채 오래되면 낡은 것으로 본다.
+    """
+    sig = (blk_type, round(blk_dist), bool(blk_section))
+    if sig != self._sig:
+      self._sig = sig
+      self._sig_t = now
+    has_signal = blk_type in (BLOCK_START, BLOCK_MID, BLOCK_END) or bool(blk_section)
+    self.fresh = int(has_signal and (now - self._sig_t) <= SECTION_STALE_SEC)
+
+  def _update_risk(self, now: float) -> None:
+    """구간 평균속도 위반 위험을 본다.
+
+    ★ 방향을 헷갈리기 쉽다. `nSdiBlockTime` 은 **제한속도로 갔을 때 걸리는 최소 시간**이다
+    (실측 372초 = 11,393m ÷ 110km/h). 따라서
+
+      - 카운트다운이 0 이 되기 **전에** 종점에 닿으면 → 그만큼 빨리 간 것 = **위반**
+      - 구간 안에서 0 에 도달하면 → 최소 시간을 채운 것 = **준수**
+
+    구간 안에서 0 을 위반으로 읽으면 정반대가 된다.
+    여기서는 현재 페이스로 종점까지 걸릴 시간을 카운트다운과 비교해 미리 경고한다.
+    """
+    if self.state not in (SEC_INSIDE, SEC_EXIT) or self.countdown <= 0:
+      self.risk = 0
+      return
+    speed_kph = self._own_speed_kph(now)
+    if speed_kph <= 0 or self.remain <= 0:
+      self.risk = 0
+      return
+    eta = self.remain / (speed_kph / 3.6)
+    # 남은 거리를 지금 페이스로 달리면 카운트다운보다 먼저 도착한다 = 평균 초과
+    self.risk = int(eta < self.countdown)
+
+  def _own_speed_kph(self, now: float) -> float:
+    dt = now - self.t_enter
+    if dt < AVG_WARMUP_SEC or self.traveled <= 0.0:
+      return 0.0
+    return self.traveled / dt * 3.6
+
+  def _update_countdown(self, now: float, raw: int) -> None:
+    """위반 카운트다운. 값 0(소진)과 필드 부재(-1)를 구분하되 글리치 0 은 거른다.
+
+    `nSdiBlockTime` 도 평균속도와 같은 뭉치 0 글리치를 갖는다(실측: 351 에서 갑자기 0,
+    다음 패킷에 다시 351). 그대로 받으면 **위반 플래그가 오탐한다** — 오탐하면 안 되는
+    신호다. 진짜 소진은 작은 값을 거쳐 오므로, 직전 유효값이 충분히 작을 때만 0 을 믿는다.
+    """
+    if raw > 0:
+      self._cd_valid = raw
+      self._cd_zero_t = 0.0
+      self.countdown = raw
+      return
+    if raw < 0:
+      self.countdown = -1        # 필드 자체가 없다
+      return
+
+    # raw == 0
+    if self._cd_zero_t == 0.0:
+      self._cd_zero_t = now
+    genuine = (0 <= self._cd_valid <= CD_ZERO_TRUST_SEC) or \
+              (now - self._cd_zero_t) > AVG_ZERO_HOLD_SEC
+    self.countdown = 0 if genuine else self._cd_valid
+
+  def _update_avg(self, now: float, raw: int) -> None:
+    """평균속도의 0 뭉치와 진입 직후 요동을 거른다."""
+    if raw > 0:
+      self._avg_valid = raw
+      self._avg_zero_t = 0.0
+    else:
+      # 0 은 3~6패킷(1~2초) 뭉치로 온다. 짧으면 직전 유효값을 유지하고 길어지면 버린다.
+      if self._avg_zero_t == 0.0:
+        self._avg_zero_t = now
+      elif (now - self._avg_zero_t) > AVG_ZERO_HOLD_SEC:
+        self._avg_valid = -1
+
+    if self.state in (SEC_INSIDE, SEC_EXIT) and (now - self.t_enter) < AVG_WARMUP_SEC:
+      self.tmap_avg = -1        # 진입 직후는 표본이 모자라 요동한다(46 → 71 실측)
+    else:
+      self.tmap_avg = self._avg_valid
+
   def own_avg_kph(self, now: float) -> int:
     """자체 추적 평균속도(km/h). 판단 불가면 -1."""
     if self.state not in (SEC_INSIDE, SEC_EXIT):
       return -1
     dt = now - self.t_enter
-    if dt <= 1.0 or self.traveled <= 0.0:
+    # 창이 짧으면 표본이 모자라 터무니없는 값이 나온다(실측 진입 직후 249km/h).
+    # 티맵 평균속도와 같은 기준으로 워밍업을 준다.
+    if dt < AVG_WARMUP_SEC or self.traveled <= 0.0:
       return -1
     return int(round(self.traveled / dt * 3.6))
 
@@ -186,7 +307,15 @@ class SectionTracker:
     self.traveled = 0.0
     self.remain = 0.0
     self.tmap_avg = -1
+    self.countdown = -1
+    self.risk = 0
+    self.fresh = 0
     self._arm_dist = 1e9
+    self._avg_valid = -1
+    self._avg_zero_t = 0.0
+    self._cd_valid = -1
+    self._cd_zero_t = 0.0
+    self._sig = None
 
 
 class TmapNavLogic:
@@ -262,21 +391,29 @@ class TmapNavLogic:
     # 자차 이동거리는 SDI 유효성과 무관하게 항상 누적한다. 구간 내부에서는 SDI 가
     # 아예 안 오므로, 그때도 거리를 세고 있어야 한다.
     moved = self.section.step_distance(now_mono, lat, lon, have_fix and link)
-    if sdi_usable:
+
+    # ★ 구간 채널에는 `ageMs.sdi` 게이트를 태우지 않는다.
+    # 원격이 구간단속을 점 SDI 와 별개 채널로 분리한 뒤로 그 나이는 구간 갱신에
+    # 반응하지 않는다. 태우면 살아 있는 구간 정보를 진입 수십 초 뒤부터 전량 버린다.
+    # 대신 출처(sdiFrom)만 확인하고, 신선도는 SectionTracker 가 필드 변화로 직접 본다.
+    section_usable = guiding and sdi_src == SDI_SOURCE_OK
+    if not link:
+      self.section.reset()   # 링크가 끊기면 붙들고 있던 구간 상태도 버린다
+    elif section_usable:
       self.section.update(
         now_mono, moved,
-        sdi_type,
+        _as_int(a.get("nSdiType"), -1),
         _as_int(a.get("nSdiBlockType")),
         _as_int(a.get("nSdiBlockSpeed")),
         float(_as_int(a.get("nSdiBlockDist"))),
         _as_int(a.get("nSdiBlockAverageSpeed")),
-        sdi_dist,
+        _as_int(a.get("nSdiBlockTime"), -1),
+        bool(a.get("bSdiBlockSection")),
+        float(_as_int(a.get("nSdiDist"))),
       )
-    elif not link:
-      self.section.reset()   # 링크가 끊기면 붙들고 있던 구간 상태도 버린다
     else:
-      # 안내는 살아 있는데 SDI 만 없는 구간 — 내부 추적을 계속 돌린다
-      self.section.update(now_mono, moved, -1, 0, 0, 0.0, 0, 0.0)
+      # 안내가 꺼졌거나 출처를 못 믿는 구간 — 내부 추적만 계속 돌린다
+      self.section.update(now_mono, moved, -1, 0, 0, 0.0, 0, -1, False, 0.0)
 
     sec = self.section
 
@@ -304,6 +441,9 @@ class TmapNavLogic:
       "bt": round(sec.traveled, 1),       # 진입 후 자체 누적 이동거리(m)
       "ba": sec.tmap_avg,                 # 티맵 구간 평균속도(km/h), -1=없음/무효
       "bo": sec.own_avg_kph(now_mono),    # 자체 추적 평균속도(km/h), -1=판단불가
+      "bk": sec.countdown,                # 위반 카운트다운(초), -1=없음. 0=소진
+      "bv": sec.risk,                     # 1=현재 페이스면 평균속도 초과(위반 위험)
+      "bf": sec.fresh,                    # 1=구간 필드가 실제로 갱신되고 있다
     }
 
 
