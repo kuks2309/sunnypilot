@@ -19,7 +19,7 @@ from openpilot.system.ui.widgets import Widget
 FONT_SIZE = 52
 PAD_X = 22
 PAD_Y = 12
-RIGHT_MARGIN = 40
+LEFT_MARGIN = 40  # 사용자 요청(2026-08-06): 왼쪽 배치
 
 COLOR_OP = rl.Color(0, 201, 101, 230)       # green
 COLOR_TESLA = rl.Color(226, 33, 60, 230)    # tesla red
@@ -57,7 +57,7 @@ class DelegIndicator(Widget):
             txt, color = f"T {int(self._blend * 100):d}%", COLOR_BLEND
 
         sz = measure_text_cached(self._font, txt, FONT_SIZE)
-        x = self.rect.x + self.rect.width - RIGHT_MARGIN - sz.x - 2 * PAD_X
+        x = self.rect.x + LEFT_MARGIN
         y = self.rect.y + self.rect.height / 2 - sz.y / 2 - PAD_Y
         box = rl.Rectangle(x, y, sz.x + 2 * PAD_X, sz.y + 2 * PAD_Y)
         rl.draw_rectangle_rounded(box, 0.3, 8, COLOR_BG)

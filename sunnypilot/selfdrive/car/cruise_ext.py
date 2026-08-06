@@ -25,6 +25,9 @@ V_CRUISE_MIN = 8
 V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
 
+TESLA_SYNC_LC_BOOST_KPH = 15.0   # overtake headroom above Tesla set during lane change
+TESLA_SYNC_LC_BOOST_HOLD = 300   # frames (~3s @100Hz) to keep the boost after blinker off
+
 
 def update_manual_button_timers(CS: car.CarState, button_timers: dict[car.CarState.ButtonEvent.Type, int]) -> None:
   # increment timer for buttons still pressed
@@ -52,6 +55,7 @@ class VCruiseHelperSP:
     self.short_increment = self.params.get("CustomAccShortPressIncrement", return_default=True)
     self.long_increment = self.params.get("CustomAccLongPressIncrement", return_default=True)
     self.tesla_speed_sync = self.params.get_bool("TeslaSpeedSync")
+    self._tesla_sync_boost_frames = 0
 
     self.enable_button_timers = CRUISE_BUTTON_TIMER
 
@@ -71,18 +75,27 @@ class VCruiseHelperSP:
     self.long_increment = self.params.get("CustomAccLongPressIncrement", return_default=True)
     self.tesla_speed_sync = self.params.get_bool("TeslaSpeedSync")
 
-  def apply_tesla_speed_sync(self, CS_SP) -> None:
+  def apply_tesla_speed_sync(self, CS_SP, CS) -> None:
     """TeslaSpeedSync: openpilot's cruise target follows Tesla's own dynamic set speed.
 
     Unifies the two speed-setting schemes (op button counter vs Tesla's road-aware target).
     Field data 2026-08-06: handover setpoint gaps averaged +32 kph, yanking speed at every
     delegation edge; with this on, speed adjustments become Tesla-native (stalk/screen).
-    Toggle off, cruise not initialized, or Tesla value invalid (0) -> untouched."""
+    Lane-change boost: syncing alone capped the overtake headroom at Tesla's (traffic-bound)
+    set speed and killed lane-change acceleration (near rear-end, field report 2026-08-06
+    evening) -- during blinker and shortly after, add headroom so the lead-release overtake
+    accelerates again. Toggle off, cruise not initialized, or invalid value (0) -> untouched."""
     if not self.tesla_speed_sync or self.v_cruise_kph == V_CRUISE_UNSET:
       return
     tset = float(CS_SP.teslaAccSetSpeed)
     if tset < 1.0:
       return
+    if CS.leftBlinker or CS.rightBlinker:
+      self._tesla_sync_boost_frames = TESLA_SYNC_LC_BOOST_HOLD
+    elif self._tesla_sync_boost_frames > 0:
+      self._tesla_sync_boost_frames -= 1
+    if self._tesla_sync_boost_frames > 0:
+      tset += TESLA_SYNC_LC_BOOST_KPH
     self.v_cruise_kph = float(np.clip(tset, V_CRUISE_MIN, V_CRUISE_MAX))
     self.v_cruise_cluster_kph = self.v_cruise_kph
 
