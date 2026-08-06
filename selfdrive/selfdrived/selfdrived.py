@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import json
+# [단속카메라 비활성화 2026-08-06] json 은 단속카메라 payload 파싱 전용이었다. 되살릴 때 함께 주석 해제.
+# import json
 import os
 import time
 import threading
@@ -180,13 +181,14 @@ class SelfdriveD(CruiseHelper):
     self.events.clear()
     self.events_sp.clear()
 
+    # [단속카메라 비활성화 2026-08-06] 거리경고 이벤트 발생 중단. 되살리려면 아래 블록 주석 해제 + 상단 json import 복구.
     # 단속카메라 거리경고: speed_camera_warnd 가 보낸 stage>0 이면 표시(ET.PERMANENT → engage 무관)
-    try:
-      raw = self.sm['customReservedRawData0']
-      if raw and json.loads(bytes(raw)).get("s", 0) > 0:
-        self.events.add(EventName.speedCameraWarning)
-    except (ValueError, TypeError):
-      pass
+    # try:
+    #   raw = self.sm['customReservedRawData0']
+    #   if raw and json.loads(bytes(raw)).get("s", 0) > 0:
+    #     self.events.add(EventName.speedCameraWarning)
+    # except (ValueError, TypeError):
+    #   pass
 
     if self.sm['controlsState'].lateralControlState.which() == 'debugState':
       self.events.add(EventName.joystickDebug)

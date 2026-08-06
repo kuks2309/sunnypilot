@@ -93,20 +93,21 @@ class VisualsLayout(Widget):
            "This displays what the car is currently doing, not what the planner is requesting."),
         None,
       ),
-      "SpeedCameraWarnEnabled": (
-        lambda: tr("Speed Camera Warning (Korea)"),
-        tr("Show an on-screen alert and chime when approaching a Korean fixed speed / section enforcement camera. " +
-           "Two stages: heads-up at ~600m, then a deceleration warning when overspeeding. " +
-           "Works even when openpilot is not engaged. Requires the camera database to be installed on device."),
-        None,
-      ),
-      "SpeedCameraDecelEnabled": (
-        lambda: tr("Speed Camera: Slow Down (when engaged)"),
-        tr("When engaged, automatically slow down to the camera speed limit + 5 km/h before a speed camera, " +
-           "and hold the limit through a section-control zone. Only acts while openpilot longitudinal is engaged; " +
-           "it can only lower speed, never raise it. Requires the warning above and the camera database."),
-        None,
-      ),
+      # [단속카메라 비활성화 2026-08-06] 동작하지 않는 토글을 남기지 않도록 설정 목록에서 제외.
+      # "SpeedCameraWarnEnabled": (
+      #   lambda: tr("Speed Camera Warning (Korea)"),
+      #   tr("Show an on-screen alert and chime when approaching a Korean fixed speed / section enforcement camera. " +
+      #      "Two stages: heads-up at ~600m, then a deceleration warning when overspeeding. " +
+      #      "Works even when openpilot is not engaged. Requires the camera database to be installed on device."),
+      #   None,
+      # ),
+      # "SpeedCameraDecelEnabled": (
+      #   lambda: tr("Speed Camera: Slow Down (when engaged)"),
+      #   tr("When engaged, automatically slow down to the camera speed limit + 5 km/h before a speed camera, " +
+      #      "and hold the limit through a section-control zone. Only acts while openpilot longitudinal is engaged; " +
+      #      "it can only lower speed, never raise it. Requires the warning above and the camera database."),
+      #   None,
+      # ),
       "TmapNavEnabled": (
         lambda: tr("TMAP Navigation Data (Korea)"),
         tr("Receive live navigation data (road speed limit, enforcement points, turn-by-turn) from the TMAP " +
@@ -141,29 +142,30 @@ class VisualsLayout(Widget):
       button_width=350,
       inline=False
     )
-    self._speed_cam_sound = multiple_button_item_sp(
-      title=lambda: tr("Speed Camera Warning Sound"),
-      description=lambda: tr("Sound played for speed camera warnings (when the warning starts). Mute = on-screen only."),
-      buttons=[lambda: tr("Mute"), lambda: tr("Soft"), lambda: tr("Immediate"), lambda: tr("Prompt")],
-      param="SpeedCameraWarnSound",
-      button_width=350,
-      inline=False
-    )
-    self._speed_cam_margin = multiple_button_item_sp(
-      title=lambda: tr("Speed Camera Slow Down: Start Margin"),
-      description=lambda: tr("Extra distance before the computed deceleration point. Larger = start slowing earlier. " +
-                            "The deceleration rate matches normal lead-following braking and is not changed."),
-      buttons=[lambda: tr("0 m"), lambda: tr("15 m"), lambda: tr("30 m"), lambda: tr("50 m"), lambda: tr("80 m")],
-      param="SpeedCameraDecelMargin",
-      button_width=220,
-      inline=False
-    )
+    # [단속카메라 비활성화 2026-08-06] 경고음·시작여유 선택기 제외.
+    # self._speed_cam_sound = multiple_button_item_sp(
+    #   title=lambda: tr("Speed Camera Warning Sound"),
+    #   description=lambda: tr("Sound played for speed camera warnings (when the warning starts). Mute = on-screen only."),
+    #   buttons=[lambda: tr("Mute"), lambda: tr("Soft"), lambda: tr("Immediate"), lambda: tr("Prompt")],
+    #   param="SpeedCameraWarnSound",
+    #   button_width=350,
+    #   inline=False
+    # )
+    # self._speed_cam_margin = multiple_button_item_sp(
+    #   title=lambda: tr("Speed Camera Slow Down: Start Margin"),
+    #   description=lambda: tr("Extra distance before the computed deceleration point. Larger = start slowing earlier. " +
+    #                         "The deceleration rate matches normal lead-following braking and is not changed."),
+    #   buttons=[lambda: tr("0 m"), lambda: tr("15 m"), lambda: tr("30 m"), lambda: tr("50 m"), lambda: tr("80 m")],
+    #   param="SpeedCameraDecelMargin",
+    #   button_width=220,
+    #   inline=False
+    # )
 
     items = list(self._toggles.values()) + [
       self._chevron_info,
       self._dev_ui_info,
-      self._speed_cam_sound,
-      self._speed_cam_margin,
+      # self._speed_cam_sound,    # [단속카메라 비활성화 2026-08-06]
+      # self._speed_cam_margin,   # [단속카메라 비활성화 2026-08-06]
     ]
     return items
 
@@ -174,8 +176,9 @@ class VisualsLayout(Widget):
       self._toggles[param].action_item.set_state(self._params.get_bool(param))
 
     self._dev_ui_info.action_item.set_selected_button(ui_state.params.get("DevUIInfo", return_default=True))
-    self._speed_cam_sound.action_item.set_selected_button(ui_state.params.get("SpeedCameraWarnSound", return_default=True))
-    self._speed_cam_margin.action_item.set_selected_button(ui_state.params.get("SpeedCameraDecelMargin", return_default=True))
+    # [단속카메라 비활성화 2026-08-06] 위젯이 생성되지 않으므로 참조도 제거(남기면 AttributeError).
+    # self._speed_cam_sound.action_item.set_selected_button(ui_state.params.get("SpeedCameraWarnSound", return_default=True))
+    # self._speed_cam_margin.action_item.set_selected_button(ui_state.params.get("SpeedCameraDecelMargin", return_default=True))
 
     if ui_state.has_longitudinal_control:
       self._chevron_info.set_description(tr(CHEVRON_INFO_DESCRIPTION["enabled"]))

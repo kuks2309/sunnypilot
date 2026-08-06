@@ -138,7 +138,10 @@ procs = [
   PythonProcess("ui", "selfdrive.ui.ui", always_run, restart_if_crash=True),
   PythonProcess("soundd", "selfdrive.ui.soundd", driverview),
   PythonProcess("locationd", "selfdrive.locationd.locationd", only_onroad),
-  PythonProcess("speed_camera_warnd", "selfdrive.speed_camera.speed_camera_warnd", only_onroad),
+  # [단속카메라 비활성화 2026-08-06] 데몬 미등록 → customReservedRawData0 발행 중단 = 기능 정지.
+  # 이 토픽은 services.py 에서 주기 0(on-demand)이라 미발행이어도 SubMaster alive/valid 검사에 걸리지 않는다(commIssue 없음).
+  # 되살리려면 아래 한 줄의 주석만 해제.
+  # PythonProcess("speed_camera_warnd", "selfdrive.speed_camera.speed_camera_warnd", only_onroad),
   PythonProcess("tmap_navd", "selfdrive.tmap_nav.tmap_navd", tmap_nav),
   NativeProcess("_pandad", "selfdrive/pandad", ["./pandad"], always_run, enabled=False),
   PythonProcess("calibrationd", "selfdrive.locationd.calibrationd", only_onroad),
