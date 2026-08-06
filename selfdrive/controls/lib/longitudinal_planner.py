@@ -212,6 +212,10 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     # (BSM trip / state change) to avoid accel<->brake oscillation (ccg/Gemini #4).
     self.lane_change_clear_time = self.lane_change_clear_time + self.dt if release_cond else 0.0
     self.lane_change_lead_release = self.lane_change_clear_time >= LC_RELEASE_HOLD
+    # Overtake window for speed-target selection (TeslaSpeedSync): the maneuver is "done"
+    # when the model judges the car settled in the new lane (state back to off) -- the
+    # steering-returned-to-baseline moment, but immune to road-curvature shifts.
+    self.lane_change_overtake = starting or meta.laneChangeState == log.LaneChangeState.laneChangeFinishing
 
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
