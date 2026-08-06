@@ -194,6 +194,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   aTarget @5 :Float32;
   events @6 :List(OnroadEventSP.Event);
   e2eAlerts @7 :E2eAlerts;
+  laneChangeLeadRelease @8 :Bool;  # planner overtake mode (V3 lead release) is active
 
   struct DynamicExperimentalControl {
     state @0 :DynamicExperimentalControlState;
