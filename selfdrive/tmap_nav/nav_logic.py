@@ -73,6 +73,10 @@ AVG_WARMUP_SEC = 30.0
 # 351 에서 갑자기 0 이 오는 글리치가 있어, 그대로 받으면 위반 플래그가 오탐한다.
 CD_ZERO_TRUST_SEC = 5
 
+# 구간 안에서 카운트다운이 이보다 크게 되오르면 글리치로 본다.
+# 실측(8/7): 14 -> 372(초기값) -> 13. 정상 진행은 패킷당 1~2초씩 감소한다.
+CD_RISE_TOLERANCE = 5
+
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
   """두 좌표 사이 거리(m)."""
@@ -251,6 +255,13 @@ class SectionTracker:
     신호다. 진짜 소진은 작은 값을 거쳐 오므로, 직전 유효값이 충분히 작을 때만 0 을 믿는다.
     """
     if raw > 0:
+      # 구간 안에서 카운트다운은 감소만 한다. 위로 튀면 글리치다.
+      # 실측(8/7 17:59:19): 14 -> 372(초기값) -> 13. 평균속도 0 글리치와 같은 순간에 온다.
+      # 그대로 받으면 "시간이 많이 남았다"로 오판해 위반 위험이 오탐한다.
+      if (self.state in (SEC_INSIDE, SEC_EXIT) and self._cd_valid > 0
+          and raw > self._cd_valid + CD_RISE_TOLERANCE):
+        self.countdown = self._cd_valid
+        return
       self._cd_valid = raw
       self._cd_zero_t = 0.0
       self.countdown = raw
